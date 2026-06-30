@@ -19,9 +19,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { usePrompts } from "@/hooks/use-prompts";
 import { categoryRepository, promptRepository, tagRepository } from "@/lib/repositories/dexie-repositories";
-import { useUIStore } from "@/lib/stores";
+import { usePrivacyStore, useUIStore } from "@/lib/stores";
 import { formatDate } from "@/lib/utils";
-import type { Category, Tag } from "@/types";
+import type { Category, PrivateFilter, Tag } from "@/types";
 import { useEffect } from "react";
 
 export default function PromptsPage() {
@@ -29,9 +29,16 @@ export default function PromptsPage() {
   const { prompts, loading, refresh } = usePrompts();
   const query = useUIStore((state) => state.query);
   const setQuery = useUIStore((state) => state.setQuery);
+  const privacyModeEnabled = usePrivacyStore((state) => state.privacyModeEnabled);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [searchInput, setSearchInput] = useState(query.search ?? "");
+
+  useEffect(() => {
+    if (!privacyModeEnabled && query.privateFilter) {
+      setQuery({ privateFilter: undefined });
+    }
+  }, [privacyModeEnabled, query.privateFilter, setQuery]);
 
   useEffect(() => {
     void Promise.all([categoryRepository.getAll(), tagRepository.getAll()]).then(([cats, tagList]) => {
@@ -62,6 +69,12 @@ export default function PromptsPage() {
     if (!query.categoryId) return null;
     return categories.find((item) => item.id === query.categoryId)?.name;
   }, [categories, query.categoryId]);
+
+  const privateFilterLabel = useMemo(() => {
+    if (query.privateFilter === "private") return "仅隐私";
+    if (query.privateFilter === "public") return "仅公开";
+    return null;
+  }, [query.privateFilter]);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -184,14 +197,36 @@ export default function PromptsPage() {
               </SelectContent>
             </Select>
           </div>
+
+          {privacyModeEnabled && (
+            <div className="space-y-2">
+              <Label>隐私筛选</Label>
+              <Select
+                value={query.privateFilter ?? "all"}
+                onValueChange={(value) =>
+                  setQuery({ privateFilter: value === "all" ? undefined : (value as PrivateFilter) })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="private">仅隐私 Prompt</SelectItem>
+                  <SelectItem value="public">仅公开 Prompt</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {(categoryName || query.isFavorite || query.search) && (
+      {(categoryName || query.isFavorite || query.search || privateFilterLabel) && (
         <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
           {query.search && <Badge variant="outline">搜索: {query.search}</Badge>}
           {categoryName && <Badge variant="outline">分类: {categoryName}</Badge>}
           {query.isFavorite && <Badge variant="outline">仅收藏</Badge>}
+          {privateFilterLabel && <Badge variant="outline">{privateFilterLabel}</Badge>}
         </div>
       )}
 

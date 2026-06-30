@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Download, Lock, Upload } from "lucide-react";
+import { Download, Shield, ShieldOff, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,20 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { importExportRepository } from "@/lib/repositories/dexie-repositories";
 import { usePrivacyStore, useSettingsStore } from "@/lib/stores";
 import type { ExportBundle, ImportConflictStrategy } from "@/types";
 
 export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const {
-    privacyModeEnabled,
-    showPrivacyToggle,
-    togglePrivacyMode,
-    registerSecretTap,
-    secretTapCount,
-  } = usePrivacyStore();
+  const privacyModeEnabled = usePrivacyStore((state) => state.privacyModeEnabled);
+  const passwordHash = usePrivacyStore((state) => state.passwordHash);
+  const disablePrivacyMode = usePrivacyStore((state) => state.disablePrivacyMode);
+  const openPasswordDialog = usePrivacyStore((state) => state.openPasswordDialog);
   const {
     translationProvider,
     translationApiKey,
@@ -63,42 +59,52 @@ export default function SettingsPage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted-foreground">隐私模式、导入导出与翻译配置</p>
+        <p className="text-sm text-muted-foreground">导入导出、隐私模式与翻译配置</p>
       </div>
 
       {message && <p className="text-sm text-muted-foreground">{message}</p>}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Lock className="h-4 w-4" />
-            隐私模式
-          </CardTitle>
-          <CardDescription>
-            连续点击顶部 Logo 10 次可显示隐私开关。开启后可查看、编辑和导出标记为隐私的 Prompt。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-            <div>
-              <p className="font-medium">隐私模式</p>
-              <p className="text-sm text-muted-foreground">
-                {showPrivacyToggle ? "开关已解锁" : "开关尚未解锁，请连点 Logo"}
-              </p>
+      {privacyModeEnabled ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Shield className="h-4 w-4" />
+              隐私模式
+            </CardTitle>
+            <CardDescription>隐私模式已开启，可查看和管理标记为隐私的 Prompt。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+              <p>在 Prompts 页面可使用「隐私筛选」快速定位隐私内容。</p>
+              <p className="mt-1">导出 JSON 时会包含隐私 Prompt；关闭隐私模式后导出将自动排除隐私内容。</p>
             </div>
-            <Switch
-              checked={privacyModeEnabled}
-              disabled={!showPrivacyToggle}
-              onCheckedChange={togglePrivacyMode}
-            />
-          </div>
-          {!showPrivacyToggle && (
-            <Button variant="outline" onClick={registerSecretTap}>
-              连点解锁隐私开关 ({secretTapCount}/10)
+            <Button variant="outline" onClick={disablePrivacyMode}>
+              <ShieldOff className="h-4 w-4" />
+              关闭隐私模式
             </Button>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Shield className="h-4 w-4" />
+              隐私模式
+            </CardTitle>
+            <CardDescription>
+              {passwordHash
+                ? "隐私模式当前已关闭。连续点击顶部 Logo 10 次并输入密码可重新开启。"
+                : "隐私模式尚未初始化。连续点击顶部 Logo 10 次可设置密码并开启。"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" onClick={openPasswordDialog}>
+              <Shield className="h-4 w-4" />
+              开启隐私模式
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

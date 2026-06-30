@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getDb } from "@/lib/db";
+import { migrateFlatTagNames } from "@/lib/db/migrate-tags";
+import { seedIfEmpty } from "@/lib/seed";
 
 export function DbProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -9,6 +11,8 @@ export function DbProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     getDb()
       .open()
+      .then(() => migrateFlatTagNames())
+      .then(() => seedIfEmpty())
       .then(() => setReady(true))
       .catch(console.error);
   }, []);

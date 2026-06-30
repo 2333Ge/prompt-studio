@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import { FolderTree, Home, Moon, Settings, Sparkles, Sun, Tags } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { usePrivacyStore } from "@/lib/stores";
+import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -19,7 +19,7 @@ const navItems = [
 export function AppNav() {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const { privacyModeEnabled, registerSecretTap, showPrivacyToggle } = usePrivacyStore();
+  const { privacyModeEnabled, registerSecretTap, disablePrivacyMode } = usePrivacyStore();
 
   return (
     <header className="flex h-14 items-center justify-between border-b px-4">
@@ -54,15 +54,14 @@ export function AppNav() {
         </nav>
       </div>
       <div className="flex items-center gap-2">
-        {showPrivacyToggle && (
-          <span
-            className={cn(
-              "rounded-full px-2 py-1 text-xs",
-              privacyModeEnabled ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
-            )}
+        {privacyModeEnabled && (
+          <button
+            type="button"
+            onClick={disablePrivacyMode}
+            className="rounded-full bg-primary px-2 py-1 text-xs text-primary-foreground transition-opacity hover:opacity-80"
           >
-            {privacyModeEnabled ? "隐私模式" : "普通模式"}
-          </span>
+            隐私模式
+          </button>
         )}
         <Button
           variant="ghost"

@@ -13,9 +13,10 @@ import { useRouter } from "next/navigation";
 export default function DashboardPage() {
   const router = useRouter();
   const { prompts, loading, refresh } = usePrompts();
+  const publicPrompts = prompts.filter((prompt) => !prompt.isPrivate);
 
-  const favorites = prompts.filter((prompt) => prompt.isFavorite).slice(0, 5);
-  const recent = [...prompts]
+  const favorites = publicPrompts.filter((prompt) => prompt.isFavorite).slice(0, 5);
+  const recent = [...publicPrompts]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 5);
 
@@ -38,10 +39,10 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>{loading ? "..." : prompts.length}</CardTitle>
+            <CardTitle>{loading ? "..." : publicPrompts.length}</CardTitle>
             <CardDescription>Prompt 总数</CardDescription>
           </CardHeader>
         </Card>
@@ -49,12 +50,6 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle>{favorites.length}</CardTitle>
             <CardDescription>收藏 Prompt</CardDescription>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{prompts.filter((prompt) => prompt.isPrivate).length}</CardTitle>
-            <CardDescription>隐私 Prompt（需开启隐私模式可见）</CardDescription>
           </CardHeader>
         </Card>
       </div>

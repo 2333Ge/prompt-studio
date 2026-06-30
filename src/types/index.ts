@@ -86,6 +86,8 @@ export interface PromptWithRelations extends Prompt {
 export type SortField = "updatedAt" | "lastUsedAt" | "rating" | "title";
 export type SortOrder = "asc" | "desc";
 
+export type PrivateFilter = "all" | "private" | "public";
+
 export interface PromptQueryOptions {
   search?: string;
   categoryId?: string | null;
@@ -93,6 +95,7 @@ export interface PromptQueryOptions {
   isFavorite?: boolean;
   minRating?: number;
   includePrivate?: boolean;
+  privateFilter?: PrivateFilter;
   sortBy?: SortField;
   sortOrder?: SortOrder;
 }

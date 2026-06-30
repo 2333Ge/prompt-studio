@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Copy, Eye, History, Lock, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,14 +29,13 @@ import { usePrompt } from "@/hooks/use-prompts";
 import {
   categoryRepository,
   promptRepository,
-  schemaRepository,
   tagRepository,
   versionRepository,
 } from "@/lib/repositories/dexie-repositories";
 import { usePrivacyStore, useUIStore } from "@/lib/stores";
 import { copyToClipboard } from "@/lib/utils";
-import { fillTemplate, findMissingVariables, parseVariables } from "@/lib/variables/parser";
-import { createSchemaFromVariables } from "@/lib/variables/schema-builder";
+import { fillTemplate, parseVariables } from "@/lib/variables/parser";
+import { syncSchemaFromContent } from "@/lib/variables/sync-schema";
 import type { Category, Tag } from "@/types";
 import { VariableFormPanel } from "@/components/prompt/variable-form-panel";
 import { SchemaEditorPanel } from "@/components/prompt/schema-editor-panel";
@@ -53,14 +52,13 @@ export default function PromptEditorPage() {
   const privacyModeEnabled = usePrivacyStore((state) => state.privacyModeEnabled);
   const editorPanelTab = useUIStore((state) => state.editorPanelTab);
   const setEditorPanelTab = useUIStore((state) => state.setEditorPanelTab);
-  const draftContent = useUIStore((state) => state.draftContent);
-  const draftTitle = useUIStore((state) => state.draftTitle);
-  const draftNotes = useUIStore((state) => state.draftNotes);
   const variableValues = useUIStore((state) => state.variableValues);
-  const setDraftContent = useUIStore((state) => state.setDraftContent);
-  const setDraftTitle = useUIStore((state) => state.setDraftTitle);
-  const setDraftNotes = useUIStore((state) => state.setDraftNotes);
-  const resetDraft = useUIStore((state) => state.resetDraft);
+  const setVariableValues = useUIStore((state) => state.setVariableValues);
+
+  const [localTitle, setLocalTitle] = useState("");
+  const [localContent, setLocalContent] = useState("");
+  const [localNotes, setLocalNotes] = useState("");
+  const [editorKey, setEditorKey] = useState(0);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -73,8 +71,8 @@ export default function PromptEditorPage() {
   const [versionNote, setVersionNote] = useState("");
   const [versionDialogOpen, setVersionDialogOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [missingVars, setMissingVars] = useState<string[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
+  const initializedPromptId = useRef<string | null>(null);
 
   useEffect(() => {
     void Promise.all([categoryRepository.getAll(), tagRepository.getAll()]).then(([cats, tagList]) => {
@@ -85,27 +83,29 @@ export default function PromptEditorPage() {
 
   useEffect(() => {
     if (!prompt) return;
-    resetDraft(prompt);
-    setSelectedTagIds(prompt.tags.map((tag) => tag.id));
-    setRating(prompt.rating);
-    setIsFavorite(prompt.isFavorite);
-    setIsPrivate(prompt.isPrivate);
-    setCategoryId(prompt.categoryId);
-  }, [prompt, resetDraft]);
 
-  const parsedVariables = useMemo(() => parseVariables(draftContent), [draftContent]);
-  const filledContent = useMemo(
-    () => fillTemplate(draftContent, variableValues),
-    [draftContent, variableValues],
-  );
-
-  useEffect(() => {
-    if (!prompt?.schema) {
-      setMissingVars(parsedVariables);
-      return;
+    // 仅在切换到不同 Prompt 时从数据库初始化草稿，避免 refresh 覆盖未保存输入
+    if (initializedPromptId.current !== prompt.id) {
+      setLocalTitle(prompt.title);
+      setLocalContent(prompt.content);
+      setLocalNotes(prompt.notes);
+      setEditorKey((key) => key + 1);
+      setVariableValues({});
+      initializedPromptId.current = prompt.id;
+      setSelectedTagIds(prompt.tags.map((tag) => tag.id));
+      setRating(prompt.rating);
+      setIsFavorite(prompt.isFavorite);
+      setIsPrivate(prompt.isPrivate);
+      setCategoryId(prompt.categoryId);
     }
-    setMissingVars(findMissingVariables(draftContent, Object.keys(prompt.schema.fields)));
-  }, [draftContent, parsedVariables, prompt?.schema]);
+  }, [prompt, setVariableValues]);
+
+  const parsedVariables = useMemo(() => parseVariables(localContent), [localContent]);
+  const variableKey = useMemo(() => parsedVariables.join("\0"), [parsedVariables]);
+  const filledContent = useMemo(
+    () => fillTemplate(localContent, variableValues),
+    [localContent, variableValues],
+  );
 
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">加载中...</div>;
@@ -123,14 +123,17 @@ export default function PromptEditorPage() {
   }
 
   const handleSavePrompt = async () => {
+    const { schemaId } = await syncSchemaFromContent(localContent, localTitle, prompt.schema);
+
     await promptRepository.update(prompt.id, {
-      title: draftTitle,
-      content: draftContent,
-      notes: draftNotes,
+      title: localTitle,
+      content: localContent,
+      notes: localNotes,
       categoryId,
       rating,
       isFavorite,
       isPrivate,
+      schemaId: schemaId ?? prompt.schemaId,
     });
 
     const tagNames = tagInput
@@ -153,26 +156,20 @@ export default function PromptEditorPage() {
   };
 
   const handleSaveVersion = async () => {
-    const schemaSnapshot = prompt.schema ? JSON.stringify(prompt.schema.fields) : "{}";
+    const { schemaId, fields } = await syncSchemaFromContent(localContent, localTitle, prompt.schema);
     const version = await versionRepository.create({
       promptId: prompt.id,
-      content: draftContent,
-      schemaSnapshot,
+      content: localContent,
+      schemaSnapshot: JSON.stringify(fields),
       note: versionNote,
     });
     await promptRepository.update(prompt.id, {
-      content: draftContent,
+      content: localContent,
       currentVersionId: version.id,
+      schemaId: schemaId ?? prompt.schemaId,
     });
     setVersionDialogOpen(false);
     setVersionNote("");
-    await refresh();
-  };
-
-  const handleCreateSchema = async () => {
-    const schemaInput = createSchemaFromVariables(`${prompt.title} Schema`, parsedVariables);
-    const schema = await schemaRepository.create(schemaInput);
-    await promptRepository.update(prompt.id, { schemaId: schema.id });
     await refresh();
   };
 
@@ -187,8 +184,8 @@ export default function PromptEditorPage() {
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
         <Input
-          value={draftTitle}
-          onChange={(event) => setDraftTitle(event.target.value)}
+          value={localTitle}
+          onChange={(event) => setLocalTitle(event.target.value)}
           className="max-w-sm font-medium"
         />
         <div className="flex flex-wrap items-center gap-2">
@@ -200,7 +197,7 @@ export default function PromptEditorPage() {
             <History className="h-4 w-4" />
             保存版本
           </Button>
-          <Button variant="outline" onClick={() => void handleCopy(draftContent)}>
+          <Button variant="outline" onClick={() => void handleCopy(localContent)}>
             <Copy className="h-4 w-4" />
             复制正文
           </Button>
@@ -317,24 +314,19 @@ export default function PromptEditorPage() {
             <Label htmlFor="notes">备注</Label>
             <Textarea
               id="notes"
-              value={draftNotes}
-              onChange={(event) => setDraftNotes(event.target.value)}
+              value={localNotes}
+              onChange={(event) => setLocalNotes(event.target.value)}
               placeholder="Prompt 用途、使用说明..."
               rows={2}
             />
           </div>
 
-          {missingVars.length > 0 && (
-            <div className="border-b bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-              检测到未定义变量：{missingVars.join(", ")}
-              <Button size="sm" variant="outline" className="ml-3" onClick={() => void handleCreateSchema()}>
-                创建 Schema
-              </Button>
-            </div>
-          )}
-
           <div className="min-h-0 flex-1">
-            <MonacoEditor value={draftContent} onChange={setDraftContent} />
+            <MonacoEditor
+              key={`${prompt.id}-${editorKey}`}
+              defaultValue={localContent}
+              onChange={setLocalContent}
+            />
           </div>
         </div>
 
@@ -348,16 +340,17 @@ export default function PromptEditorPage() {
               <TabsTrigger value="translation">翻译</TabsTrigger>
             </TabsList>
             <TabsContent value="variables" className="mt-4">
-              <VariableFormPanel prompt={prompt} variableNames={parsedVariables} />
+              <VariableFormPanel prompt={prompt} variableKey={variableKey} />
             </TabsContent>
             <TabsContent value="schema" className="mt-4">
-              <SchemaEditorPanel prompt={prompt} variableNames={parsedVariables} onRefresh={refresh} />
+              <SchemaEditorPanel prompt={prompt} variableKey={variableKey} onRefresh={refresh} />
             </TabsContent>
             <TabsContent value="versions" className="mt-4">
               <VersionPanel
                 promptId={prompt.id}
                 onRollback={(content) => {
-                  setDraftContent(content);
+                  setLocalContent(content);
+                  setEditorKey((key) => key + 1);
                   void refresh();
                 }}
               />
@@ -366,7 +359,7 @@ export default function PromptEditorPage() {
               <ResultPanel promptId={prompt.id} />
             </TabsContent>
             <TabsContent value="translation" className="mt-4">
-              <TranslationPanel content={filledContent || draftContent} />
+              <TranslationPanel content={filledContent || localContent} />
             </TabsContent>
           </Tabs>
         </aside>

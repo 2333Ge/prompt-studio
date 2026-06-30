@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { hashPassword, verifyPassword } from "@/lib/privacy/password";
 import type { PromptQueryOptions, PromptWithRelations } from "@/types";
 
 interface UIState {
@@ -17,7 +18,10 @@ interface UIState {
   setDraftContent: (content: string) => void;
   setDraftTitle: (title: string) => void;
   setDraftNotes: (notes: string) => void;
-  setVariableValues: (values: Record<string, unknown>) => void;
+  setVariableValues: (
+    values: Record<string, unknown> | ((current: Record<string, unknown>) => Record<string, unknown>),
+  ) => void;
+  mergeVariableValues: (values: Record<string, unknown>) => void;
   setQuery: (query: Partial<PromptQueryOptions>) => void;
   resetDraft: (prompt?: PromptWithRelations | null) => void;
 }
@@ -38,7 +42,21 @@ export const useUIStore = create<UIState>((set) => ({
   setDraftContent: (content) => set({ draftContent: content }),
   setDraftTitle: (title) => set({ draftTitle: title }),
   setDraftNotes: (notes) => set({ draftNotes: notes }),
-  setVariableValues: (values) => set({ variableValues: values }),
+  setVariableValues: (valuesOrUpdater) =>
+    set((state) => {
+      const next =
+        typeof valuesOrUpdater === "function" ? valuesOrUpdater(state.variableValues) : valuesOrUpdater;
+      if (Object.is(next, state.variableValues)) return state;
+      return { variableValues: next };
+    }),
+  mergeVariableValues: (values) =>
+    set((state) => {
+      const next = { ...state.variableValues, ...values };
+      if (Object.keys(values).every((key) => Object.is(state.variableValues[key], next[key]))) {
+        return state;
+      }
+      return { variableValues: next };
+    }),
   setQuery: (query) => set((state) => ({ query: { ...state.query, ...query } })),
   resetDraft: (prompt) =>
     set({
@@ -52,10 +70,15 @@ export const useUIStore = create<UIState>((set) => ({
 interface PrivacyState {
   privacyModeEnabled: boolean;
   secretTapCount: number;
-  showPrivacyToggle: boolean;
-  togglePrivacyMode: () => void;
+  passwordHash: string | null;
+  passwordDialogOpen: boolean;
   registerSecretTap: () => void;
   resetSecretTap: () => void;
+  closePasswordDialog: () => void;
+  openPasswordDialog: () => void;
+  initPassword: (password: string) => Promise<void>;
+  verifyAndEnable: (password: string) => Promise<boolean>;
+  disablePrivacyMode: () => void;
 }
 
 export const usePrivacyStore = create<PrivacyState>()(
@@ -63,20 +86,40 @@ export const usePrivacyStore = create<PrivacyState>()(
     (set, get) => ({
       privacyModeEnabled: false,
       secretTapCount: 0,
-      showPrivacyToggle: false,
-      togglePrivacyMode: () => set((state) => ({ privacyModeEnabled: !state.privacyModeEnabled })),
+      passwordHash: null,
+      passwordDialogOpen: false,
       registerSecretTap: () => {
+        if (get().privacyModeEnabled) return;
         const next = get().secretTapCount + 1;
-        set({
-          secretTapCount: next,
-          showPrivacyToggle: next >= 10 ? true : get().showPrivacyToggle,
-        });
+        if (next >= 10) {
+          set({ secretTapCount: 0, passwordDialogOpen: true });
+        } else {
+          set({ secretTapCount: next });
+        }
       },
       resetSecretTap: () => set({ secretTapCount: 0 }),
+      closePasswordDialog: () => set({ passwordDialogOpen: false, secretTapCount: 0 }),
+      openPasswordDialog: () => set({ passwordDialogOpen: true, secretTapCount: 0 }),
+      initPassword: async (password) => {
+        const hash = await hashPassword(password);
+        set({ passwordHash: hash, privacyModeEnabled: true, passwordDialogOpen: false, secretTapCount: 0 });
+      },
+      verifyAndEnable: async (password) => {
+        const { passwordHash } = get();
+        if (!passwordHash) return false;
+        const ok = await verifyPassword(password, passwordHash);
+        if (ok) {
+          set({ privacyModeEnabled: true, passwordDialogOpen: false, secretTapCount: 0 });
+        }
+        return ok;
+      },
+      disablePrivacyMode: () => set({ privacyModeEnabled: false }),
     }),
     {
       name: "prompt-studio-privacy",
-      partialize: (state) => ({ privacyModeEnabled: state.privacyModeEnabled, showPrivacyToggle: state.showPrivacyToggle }),
+      partialize: (state) => ({
+        passwordHash: state.passwordHash,
+      }),
     },
   ),
 );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,36 +18,51 @@ import type { PromptWithRelations, VariableFieldDefinition } from "@/types";
 
 interface VariableFormPanelProps {
   prompt: PromptWithRelations;
-  variableNames: string[];
+  variableKey: string;
 }
 
-export function VariableFormPanel({ prompt, variableNames }: VariableFormPanelProps) {
+export function VariableFormPanel({ prompt, variableKey }: VariableFormPanelProps) {
   const variableValues = useUIStore((state) => state.variableValues);
   const setVariableValues = useUIStore((state) => state.setVariableValues);
+  const initializedFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!prompt.schema) return;
-    const defaults: Record<string, unknown> = {};
-    for (const name of variableNames) {
-      const field = prompt.schema.fields[name];
-      if (field?.default != null) {
-        defaults[name] = field.default;
+    const initKey = `${prompt.id}:${prompt.schema?.id ?? "none"}`;
+    const variableNames = variableKey ? variableKey.split("\0") : [];
+
+    if (initializedFor.current !== initKey) {
+      initializedFor.current = initKey;
+      const initial: Record<string, unknown> = {};
+      for (const name of variableNames) {
+        const field = prompt.schema?.fields[name];
+        initial[name] = field?.default ?? "";
       }
+      setVariableValues(initial);
+      return;
     }
-    setVariableValues(defaults);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prompt.id, prompt.schema?.id, variableNames, setVariableValues]);
+
+    setVariableValues((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const name of variableNames) {
+        if (!(name in next)) {
+          const field = prompt.schema?.fields[name];
+          next[name] = field?.default ?? "";
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [prompt.id, prompt.schema, prompt.schema?.id, setVariableValues, variableKey]);
+
+  const variableNames = variableKey ? variableKey.split("\0") : [];
 
   const updateValue = (name: string, value: unknown) => {
-    setVariableValues({ ...variableValues, [name]: value });
+    setVariableValues((current) => ({ ...current, [name]: value }));
   };
 
   if (variableNames.length === 0) {
     return <p className="text-sm text-muted-foreground">当前 Prompt 没有变量占位符。</p>;
-  }
-
-  if (!prompt.schema) {
-    return <p className="text-sm text-muted-foreground">请先创建 Schema 后再填写变量。</p>;
   }
 
   return (
@@ -57,7 +72,7 @@ export function VariableFormPanel({ prompt, variableNames }: VariableFormPanelPr
       </CardHeader>
       <CardContent className="space-y-4">
         {variableNames.map((name) => {
-          const field = prompt.schema!.fields[name] ?? { type: "text", title: name };
+          const field = prompt.schema?.fields[name] ?? { type: "text", title: name };
           return (
             <VariableField
               key={name}

@@ -1,4 +1,5 @@
 import type { Table } from "dexie";
+import { flattenTagName } from "@/lib/db/migrate-tags";
 import { generateId } from "@/lib/utils";
 import { getDb } from "@/lib/db";
 import type {
@@ -112,6 +113,12 @@ export class DexiePromptRepository implements PromptRepository {
 
     if (options.isFavorite) {
       hydrated = hydrated.filter((prompt) => prompt.isFavorite);
+    }
+
+    if (options.privateFilter === "private") {
+      hydrated = hydrated.filter((prompt) => prompt.isPrivate);
+    } else if (options.privateFilter === "public") {
+      hydrated = hydrated.filter((prompt) => !prompt.isPrivate);
     }
 
     if (options.minRating) {
@@ -235,7 +242,8 @@ export class DexieTagRepository implements TagRepository {
   }
 
   async create(name: string): Promise<Tag> {
-    const tag: Tag = { id: generateId(), name, createdAt: now() };
+    const flatName = flattenTagName(name.trim());
+    const tag: Tag = { id: generateId(), name: flatName, createdAt: now() };
     await getDb().tags.add(tag);
     return tag;
   }
@@ -254,7 +262,7 @@ export class DexieTagRepository implements TagRepository {
     const results: Tag[] = [];
 
     for (const rawName of names) {
-      const name = rawName.trim();
+      const name = flattenTagName(rawName.trim());
       if (!name) continue;
       const found = existing.find((tag) => tag.name.toLowerCase() === name.toLowerCase());
       if (found) {
@@ -414,7 +422,9 @@ export class DexieImportExportRepository implements ImportExportRepository {
         };
 
         for (const category of bundle.categories) await upsert(db.categories, category);
-        for (const tag of bundle.tags) await upsert(db.tags, tag);
+        for (const tag of bundle.tags) {
+          await upsert(db.tags, { ...tag, name: flattenTagName(tag.name) });
+        }
         for (const schema of bundle.variableSchemas) await upsert(db.variableSchemas, schema);
         for (const prompt of bundle.prompts) await upsert(db.prompts, prompt);
         for (const promptTag of bundle.promptTags) await upsert(db.promptTags, promptTag);
