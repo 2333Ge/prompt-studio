@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Copy, Eye, History, Lock, Save, Star } from "lucide-react";
+import { Copy, CopyPlus, Eye, History, Lock, Save, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +41,10 @@ import { VersionPanel } from "@/components/prompt/version-panel";
 import { ResultPanel } from "@/components/prompt/result-panel";
 import { TranslationPanel } from "@/components/prompt/translation-panel";
 import { TagMultiSelect } from "@/components/prompt/tag-multi-select";
+import { EditorInsertToolbar } from "@/components/prompt/editor-insert-toolbar";
+import { InsertVariablePicker } from "@/components/prompt/insert-variable-picker";
+import { InsertPromptDialog } from "@/components/prompt/insert-prompt-dialog";
+import type { MonacoEditorHandle } from "@/components/prompt/monaco-editor";
 
 const MonacoEditor = dynamic(() => import("@/components/prompt/monaco-editor"), { ssr: false });
 
@@ -70,8 +74,11 @@ export default function PromptEditorPage() {
   const [versionNote, setVersionNote] = useState("");
   const [versionDialogOpen, setVersionDialogOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [insertVariableOpen, setInsertVariableOpen] = useState(false);
+  const [insertPromptOpen, setInsertPromptOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const initializedPromptId = useRef<string | null>(null);
+  const editorHandleRef = useRef<MonacoEditorHandle | null>(null);
 
   useEffect(() => {
     void Promise.all([categoryRepository.getAll(), tagRepository.getAll()]).then(([cats, tagList]) => {
@@ -102,9 +109,10 @@ export default function PromptEditorPage() {
 
   const parsedVariables = useMemo(() => parseVariables(localContent), [localContent]);
   const variableKey = useMemo(() => parsedVariables.join("\0"), [parsedVariables]);
+  const schemaFields = prompt?.schema?.fields ?? {};
   const filledContent = useMemo(
-    () => fillTemplate(localContent, variableValues),
-    [localContent, variableValues],
+    () => fillTemplate(localContent, variableValues, schemaFields),
+    [localContent, variableValues, schemaFields],
   );
 
   if (loading) {
@@ -176,6 +184,15 @@ export default function PromptEditorPage() {
     setTimeout(() => setSaveMessage(""), 2000);
   };
 
+  const handleDuplicate = async () => {
+    const duplicate = await promptRepository.duplicate(prompt.id);
+    router.push(`/prompts/${duplicate.id}`);
+  };
+
+  const handleInsertText = (text: string) => {
+    editorHandleRef.current?.insertText(text);
+  };
+
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
@@ -214,6 +231,10 @@ export default function PromptEditorPage() {
           <Button variant="outline" onClick={() => void handleCopy(filledContent)}>
             <Copy className="h-4 w-4" />
             复制填充结果
+          </Button>
+          <Button variant="outline" onClick={() => void handleDuplicate()}>
+            <CopyPlus className="h-4 w-4" />
+            创建副本
           </Button>
           <Button variant="outline" onClick={() => setPreviewOpen(true)}>
             <Eye className="h-4 w-4" />
@@ -287,11 +308,18 @@ export default function PromptEditorPage() {
             />
           </div>
 
-          <div className="min-h-0 flex-1">
+          <div className="relative min-h-0 flex-1">
             <MonacoEditor
               key={`${prompt.id}-${editorKey}`}
               defaultValue={localContent}
               onChange={setLocalContent}
+              onReady={(handle) => {
+                editorHandleRef.current = handle;
+              }}
+            />
+            <EditorInsertToolbar
+              onInsertVariable={() => setInsertVariableOpen(true)}
+              onInsertPrompt={() => setInsertPromptOpen(true)}
             />
           </div>
         </div>
@@ -309,7 +337,12 @@ export default function PromptEditorPage() {
               <VariableFormPanel prompt={prompt} variableKey={variableKey} />
             </TabsContent>
             <TabsContent value="schema" className="mt-4">
-              <SchemaEditorPanel prompt={prompt} variableKey={variableKey} onRefresh={refresh} />
+              <SchemaEditorPanel
+                prompt={prompt}
+                variableKey={variableKey}
+                content={localContent}
+                onRefresh={refresh}
+              />
             </TabsContent>
             <TabsContent value="versions" className="mt-4">
               <VersionPanel
@@ -354,6 +387,20 @@ export default function PromptEditorPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <InsertVariablePicker
+        open={insertVariableOpen}
+        onOpenChange={setInsertVariableOpen}
+        prompt={prompt}
+        onInsert={handleInsertText}
+      />
+
+      <InsertPromptDialog
+        open={insertPromptOpen}
+        onOpenChange={setInsertPromptOpen}
+        currentPromptId={prompt.id}
+        onInsert={handleInsertText}
+      />
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-3xl">

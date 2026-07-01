@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderTree, Home, Moon, Settings, Sparkles, Sun, Tags } from "lucide-react";
+import { Braces, FolderTree, Home, Moon, Settings, Sparkles, Sun, Tags } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { usePrivacyStore } from "@/lib/stores";
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/categories", label: "Categories", icon: FolderTree },
   { href: "/tags", label: "Tags", icon: Tags },
+  { href: "/variables", label: "Variables", icon: Braces },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

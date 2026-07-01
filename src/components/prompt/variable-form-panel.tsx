@@ -14,7 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mediaStorageAdapter } from "@/lib/storage/media-adapter";
 import { useUIStore } from "@/lib/stores";
-import type { PromptWithRelations, VariableFieldDefinition } from "@/types";
+import type { FlagValueType, PromptWithRelations, VariableFieldDefinition } from "@/types";
 
 interface VariableFormPanelProps {
   prompt: PromptWithRelations;
@@ -100,12 +100,27 @@ function VariableField({
   onChange: (value: unknown) => void;
 }) {
   const label = field.title ?? name;
+  const hint = field.hint ?? field.description;
+
+  if (field.type === "flag") {
+    return (
+      <FlagValueField
+        name={name}
+        label={label}
+        hint={hint}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
 
   switch (field.type) {
     case "textarea":
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           <Textarea value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
         </div>
       );
@@ -113,6 +128,7 @@ function VariableField({
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           <Select value={String(value ?? "")} onValueChange={onChange}>
             <SelectTrigger>
               <SelectValue placeholder="请选择" />
@@ -131,8 +147,11 @@ function VariableField({
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           <Input
             type="number"
+            min={field.min}
+            max={field.max}
             value={value == null ? "" : String(value)}
             onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
           />
@@ -142,6 +161,7 @@ function VariableField({
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           <Input type="date" value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
         </div>
       );
@@ -149,6 +169,7 @@ function VariableField({
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           <Input
             value={String(value ?? "")}
             onChange={(event) => onChange(event.target.value)}
@@ -170,8 +191,63 @@ function VariableField({
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           <Input value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
         </div>
       );
   }
+}
+
+function FlagValueField({
+  name,
+  label,
+  hint,
+  field,
+  value,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  hint?: string;
+  field: VariableFieldDefinition;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const valueType: FlagValueType = field.valueType ?? "text";
+  const flagLabel = field.flag ?? `--${name}`;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Label>{label}</Label>
+        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{flagLabel}</span>
+      </div>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+
+      {valueType === "select" ? (
+        <Select value={String(value ?? "")} onValueChange={onChange}>
+          <SelectTrigger>
+            <SelectValue placeholder="请选择" />
+          </SelectTrigger>
+          <SelectContent>
+            {(field.options ?? []).map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : valueType === "number" ? (
+        <Input
+          type="number"
+          min={field.min}
+          max={field.max}
+          value={value == null ? "" : String(value)}
+          onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
+        />
+      ) : (
+        <Input value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
+      )}
+    </div>
+  );
 }

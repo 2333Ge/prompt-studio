@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { resultRepository } from "@/lib/repositories/dexie-repositories";
+import { extractImageUrls } from "@/lib/storage/media-adapter";
 import { formatDate } from "@/lib/utils";
 import type { PromptResult } from "@/types";
 
@@ -47,11 +48,13 @@ export function ResultPanel({ promptId }: ResultPanelProps) {
 
   const handleCreate = async () => {
     if (!modelName.trim() || !content.trim()) return;
+    const imageUrls = extractImageUrls(content);
     await resultRepository.create({
       promptId,
       modelName: modelName.trim(),
       content,
       note,
+      imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
     });
     setModelName("");
     setContent("");
@@ -108,23 +111,44 @@ export function ResultPanel({ promptId }: ResultPanelProps) {
         <p className="text-sm text-muted-foreground">暂无保存的结果。</p>
       ) : (
         filtered.map((result) => (
-          <Card key={result.id}>
-            <CardContent className="space-y-2 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium">{result.modelName}</p>
-                  <p className="text-xs text-muted-foreground">{formatDate(result.createdAt)}</p>
-                </div>
-                <Button size="icon" variant="ghost" onClick={() => void handleDelete(result.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-              {result.note && <p className="text-sm text-muted-foreground">{result.note}</p>}
-              <pre className="whitespace-pre-wrap rounded-lg border bg-muted/30 p-3 text-sm">{result.content}</pre>
-            </CardContent>
-          </Card>
+          <ResultCard key={result.id} result={result} onDelete={() => void handleDelete(result.id)} />
         ))
       )}
     </div>
+  );
+}
+
+function ResultCard({ result, onDelete }: { result: PromptResult; onDelete: () => void }) {
+  const imageUrls = useMemo(
+    () => result.imageUrls ?? extractImageUrls(result.content),
+    [result.content, result.imageUrls],
+  );
+
+  return (
+    <Card>
+      <CardContent className="space-y-2 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-medium">{result.modelName}</p>
+            <p className="text-xs text-muted-foreground">{formatDate(result.createdAt)}</p>
+          </div>
+          <Button size="icon" variant="ghost" onClick={onDelete}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+        {result.note && <p className="text-sm text-muted-foreground">{result.note}</p>}
+        {imageUrls.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {imageUrls.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="" className="h-24 w-24 object-cover" />
+              </a>
+            ))}
+          </div>
+        )}
+        <pre className="whitespace-pre-wrap rounded-lg border bg-muted/30 p-3 text-sm">{result.content}</pre>
+      </CardContent>
+    </Card>
   );
 }

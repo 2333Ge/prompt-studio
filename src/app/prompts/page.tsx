@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Search, Star, Trash2 } from "lucide-react";
+import { Plus, Search, CopyPlus, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,12 @@ export default function PromptsPage() {
     if (!confirm("确定删除这个 Prompt 吗？")) return;
     await promptRepository.delete(id);
     await refresh();
+  };
+
+  const handleDuplicate = async (id: string) => {
+    const duplicate = await promptRepository.duplicate(id);
+    await refresh();
+    router.push(`/prompts/${duplicate.id}`);
   };
 
   const handleSearch = () => {
@@ -266,6 +272,9 @@ export default function PromptsPage() {
                 <div className="flex gap-2">
                   <Button variant="outline" asChild>
                     <Link href={`/prompts/${prompt.id}`}>编辑</Link>
+                  </Button>
+                  <Button variant="outline" size="icon" title="创建副本" onClick={() => void handleDuplicate(prompt.id)}>
+                    <CopyPlus className="h-4 w-4" />
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => void handleDelete(prompt.id)}>
                     <Trash2 className="h-4 w-4" />

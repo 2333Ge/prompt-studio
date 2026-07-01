@@ -4,7 +4,12 @@ export type VariableFieldType =
   | "select"
   | "number"
   | "date"
-  | "image";
+  | "image"
+  | "flag";
+
+export type VariableMorph = "inline" | "flag";
+
+export type FlagValueType = "select" | "number" | "text";
 
 export interface VariableFieldDefinition {
   type: VariableFieldType;
@@ -13,12 +18,33 @@ export interface VariableFieldDefinition {
   required?: boolean;
   default?: string | number;
   options?: string[];
+  /** CLI flag prefix, e.g. "--ar". Defaults to --{name} for flag fields. */
+  flag?: string;
+  /** Widget type when type is "flag". */
+  valueType?: FlagValueType;
+  omitIfDefault?: boolean;
+  min?: number;
+  max?: number;
+  /** Chinese hint, e.g. "推荐 300，范围 0-1000" */
+  hint?: string;
+  inlineFlag?: boolean;
 }
 
 export interface VariableSchema {
   id: string;
   name: string;
   fields: Record<string, VariableFieldDefinition>;
+  isTemplate?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GlobalVariableField {
+  id: string;
+  key: string;
+  morph: VariableMorph;
+  definition: VariableFieldDefinition;
+  tags: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -74,6 +100,7 @@ export interface PromptResult {
   modelName: string;
   content: string;
   note: string;
+  imageUrls?: string[];
   createdAt: string;
 }
 
@@ -108,6 +135,7 @@ export interface ExportBundle {
   tags: Tag[];
   promptTags: PromptTag[];
   variableSchemas: VariableSchema[];
+  globalVariableFields?: GlobalVariableField[];
   versions: PromptVersion[];
   results: PromptResult[];
 }

@@ -26,4 +26,21 @@ export class LocalMediaStorageAdapter implements MediaStorageAdapter {
   }
 }
 
+/** Placeholder for future Cloudflare R2 integration via Next.js API routes. */
+export class CloudflareR2StorageAdapter implements MediaStorageAdapter {
+  async upload(): Promise<string> {
+    throw new Error("Cloudflare R2 adapter is not configured yet");
+  }
+
+  async list(): Promise<MediaItem[]> {
+    return [];
+  }
+}
+
 export const mediaStorageAdapter: MediaStorageAdapter = new LocalMediaStorageAdapter();
+
+export const IMAGE_URL_PATTERN = /https?:\/\/[^\s"'<>]+\.(?:png|jpe?g|gif|webp|avif)(?:\?[^\s"'<>]*)?/gi;
+
+export function extractImageUrls(text: string): string[] {
+  return Array.from(new Set(text.match(IMAGE_URL_PATTERN) ?? []));
+}

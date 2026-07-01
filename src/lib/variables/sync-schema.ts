@@ -1,7 +1,23 @@
-import { schemaRepository } from "@/lib/repositories/dexie-repositories";
-import { createDefaultField, findMissingVariables, parseVariables } from "@/lib/variables/parser";
+import { globalVariableFieldRepository, schemaRepository } from "@/lib/repositories/dexie-repositories";
+import {
+  createDefaultField,
+  findMissingVariables,
+  inferVariableMorph,
+  parseVariables,
+} from "@/lib/variables/parser";
 import { createSchemaFromVariables } from "@/lib/variables/schema-builder";
 import type { VariableFieldDefinition, VariableSchema } from "@/types";
+
+async function resolveFieldDefinition(
+  name: string,
+  content: string,
+): Promise<VariableFieldDefinition> {
+  const globalField = await globalVariableFieldRepository.getByKey(name);
+  if (globalField) {
+    return structuredClone(globalField.definition);
+  }
+  return createDefaultField(name, inferVariableMorph(content, name));
+}
 
 export async function syncSchemaFromContent(
   content: string,
@@ -25,12 +41,20 @@ export async function syncSchemaFromContent(
 
     const fields = { ...existingSchema.fields };
     for (const name of missing) {
-      fields[name] = createDefaultField(name);
+      fields[name] = await resolveFieldDefinition(name, content);
     }
     const updated = await schemaRepository.update(existingSchema.id, { fields });
     return { schemaId: updated.id, fields: updated.fields };
   }
 
-  const schema = await schemaRepository.create(createSchemaFromVariables(`${title} Schema`, variableNames));
+  const fields: Record<string, VariableFieldDefinition> = {};
+  for (const name of variableNames) {
+    fields[name] = await resolveFieldDefinition(name, content);
+  }
+
+  const schema = await schemaRepository.create({
+    name: `${title} Schema`,
+    fields,
+  });
   return { schemaId: schema.id, fields: schema.fields };
 }
