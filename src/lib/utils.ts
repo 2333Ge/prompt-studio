@@ -16,6 +16,16 @@ export function formatDate(date: string | Date): string {
   }).format(typeof date === "string" ? new Date(date) : date);
 }
 
+export function formatVersionDate(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}.${m}.${day} ${h}:${min}`;
+}
+
 export async function copyToClipboard(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }

@@ -39,6 +39,7 @@ export interface VersionRepository {
   getByPromptId(promptId: string): Promise<PromptVersion[]>;
   create(input: Omit<PromptVersion, "id" | "createdAt">): Promise<PromptVersion>;
   getById(id: string): Promise<PromptVersion | null>;
+  delete(id: string): Promise<void>;
 }
 
 export interface ResultRepository {

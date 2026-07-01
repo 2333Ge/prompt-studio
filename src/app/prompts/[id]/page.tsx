@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Copy, Eye, History, Lock, Save } from "lucide-react";
+import { Copy, Eye, History, Lock, Save, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,8 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +31,7 @@ import {
   versionRepository,
 } from "@/lib/repositories/dexie-repositories";
 import { usePrivacyStore, useUIStore } from "@/lib/stores";
-import { copyToClipboard } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { fillTemplate, parseVariables } from "@/lib/variables/parser";
 import { syncSchemaFromContent } from "@/lib/variables/sync-schema";
 import type { Category, Tag } from "@/types";
@@ -42,6 +40,7 @@ import { SchemaEditorPanel } from "@/components/prompt/schema-editor-panel";
 import { VersionPanel } from "@/components/prompt/version-panel";
 import { ResultPanel } from "@/components/prompt/result-panel";
 import { TranslationPanel } from "@/components/prompt/translation-panel";
+import { TagMultiSelect } from "@/components/prompt/tag-multi-select";
 
 const MonacoEditor = dynamic(() => import("@/components/prompt/monaco-editor"), { ssr: false });
 
@@ -63,7 +62,7 @@ export default function PromptEditorPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState("");
+  const [newTagNames, setNewTagNames] = useState<string[]>([]);
   const [rating, setRating] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
@@ -93,6 +92,7 @@ export default function PromptEditorPage() {
       setVariableValues({});
       initializedPromptId.current = prompt.id;
       setSelectedTagIds(prompt.tags.map((tag) => tag.id));
+      setNewTagNames([]);
       setRating(prompt.rating);
       setIsFavorite(prompt.isFavorite);
       setIsPrivate(prompt.isPrivate);
@@ -136,20 +136,16 @@ export default function PromptEditorPage() {
       schemaId: schemaId ?? prompt.schemaId,
     });
 
-    const tagNames = tagInput
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
     const existingTags = tags.filter((tag) => selectedTagIds.includes(tag.id));
     const allTags = await tagRepository.findOrCreate([
       ...existingTags.map((tag) => tag.name),
-      ...tagNames,
+      ...newTagNames,
     ]);
     await promptRepository.setTags(
       prompt.id,
       allTags.map((tag) => tag.id),
     );
-    setTagInput("");
+    setNewTagNames([]);
     setSaveMessage("已保存");
     await refresh();
     setTimeout(() => setSaveMessage(""), 2000);
@@ -182,12 +178,26 @@ export default function PromptEditorPage() {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
-        <Input
-          value={localTitle}
-          onChange={(event) => setLocalTitle(event.target.value)}
-          className="max-w-sm font-medium"
-        />
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="shrink-0"
+            title={isFavorite ? "取消收藏" : "收藏"}
+            onClick={() => setIsFavorite((value) => !value)}
+          >
+            <Star
+              className={cn("h-4 w-4", isFavorite && "fill-amber-400 text-amber-400")}
+            />
+          </Button>
+          <Input
+            value={localTitle}
+            onChange={(event) => setLocalTitle(event.target.value)}
+            className="h-8 max-w-sm border-0 bg-transparent px-1 font-medium shadow-none focus-visible:ring-0"
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void handleSavePrompt()}>
             <Save className="h-4 w-4" />
@@ -215,109 +225,65 @@ export default function PromptEditorPage() {
 
       <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex min-h-0 flex-col border-r">
-          <div className="grid gap-3 border-b p-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-2">
-              <Label>分类</Label>
-              <Select
-                value={categoryId ?? "none"}
-                onValueChange={(value) => setCategoryId(value === "none" ? null : value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="未分类" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">未分类</SelectItem>
-                  {categories.map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>标签</Label>
-              <Input
-                value={tagInput}
-                onChange={(event) => setTagInput(event.target.value)}
-                placeholder="新建标签，逗号分隔"
-              />
-              <Select
-                value=""
-                onValueChange={(value) => {
-                  if (value && !selectedTagIds.includes(value)) {
-                    setSelectedTagIds((current) => [...current, value]);
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="从已有标签选择" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tags
-                    .filter((tag) => !selectedTagIds.includes(tag.id))
-                    .map((tag) => (
-                      <SelectItem key={tag.id} value={tag.id}>
-                        {tag.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              <div className="flex flex-wrap gap-1">
-                {tags
-                  .filter((tag) => selectedTagIds.includes(tag.id))
-                  .map((tag) => (
-                    <Badge
-                      key={tag.id}
-                      variant="secondary"
-                      className="cursor-pointer"
-                      onClick={() => setSelectedTagIds((current) => current.filter((id) => id !== tag.id))}
-                    >
-                      {tag.name} ×
-                    </Badge>
-                  ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>评分</Label>
-              <Select value={String(rating)} onValueChange={(value) => setRating(Number(value))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[0, 1, 2, 3, 4, 5].map((value) => (
-                    <SelectItem key={value} value={String(value)}>
-                      {value === 0 ? "未评分" : `${value} 星`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <Label htmlFor="favorite">收藏</Label>
-                <Switch id="favorite" checked={isFavorite} onCheckedChange={setIsFavorite} />
-              </div>
-              {privacyModeEnabled && (
-                <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                  <Label htmlFor="private" className="flex items-center gap-2">
-                    <Lock className="h-4 w-4" />
-                    隐私
-                  </Label>
-                  <Switch id="private" checked={isPrivate} onCheckedChange={setIsPrivate} />
-                </div>
-              )}
-            </div>
-          </div>
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+            <Select
+              value={categoryId ?? "none"}
+              onValueChange={(value) => setCategoryId(value === "none" ? null : value)}
+            >
+              <SelectTrigger className="h-8 w-[140px]">
+                <SelectValue placeholder="分类" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">未分类</SelectItem>
+                {categories.map((category) => (
+                  <SelectItem key={category.id} value={category.id}>
+                    {category.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          <div className="space-y-2 border-b p-4">
-            <Label htmlFor="notes">备注</Label>
+            <TagMultiSelect
+              tags={tags}
+              selectedTagIds={selectedTagIds}
+              onSelectedTagIdsChange={setSelectedTagIds}
+              newTagNames={newTagNames}
+              onNewTagNamesChange={setNewTagNames}
+            />
+
+            <Select value={String(rating)} onValueChange={(value) => setRating(Number(value))}>
+              <SelectTrigger className="h-8 w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[0, 1, 2, 3, 4, 5].map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {value === 0 ? "未评分" : `${value} 星`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {privacyModeEnabled && (
+              <Button
+                type="button"
+                size="icon"
+                variant={isPrivate ? "secondary" : "ghost"}
+                className="h-8 w-8 shrink-0"
+                title={isPrivate ? "已设为隐私" : "设为隐私"}
+                onClick={() => setIsPrivate((value) => !value)}
+              >
+                <Lock className={cn("h-4 w-4", isPrivate && "text-primary")} />
+              </Button>
+            )}
+
             <Textarea
               id="notes"
               value={localNotes}
               onChange={(event) => setLocalNotes(event.target.value)}
-              placeholder="Prompt 用途、使用说明..."
-              rows={2}
+              placeholder="备注..."
+              rows={1}
+              className="min-h-8 min-w-[160px] flex-1 resize-none py-1.5"
             />
           </div>
 
@@ -348,6 +314,7 @@ export default function PromptEditorPage() {
             <TabsContent value="versions" className="mt-4">
               <VersionPanel
                 promptId={prompt.id}
+                currentContent={localContent}
                 onRollback={(content) => {
                   setLocalContent(content);
                   setEditorKey((key) => key + 1);

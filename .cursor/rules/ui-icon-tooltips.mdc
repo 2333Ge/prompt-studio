@@ -1,0 +1,40 @@
+---
+description: Icon-only buttons must show hover tooltips with action labels
+globs: **/*.{tsx,jsx}
+alwaysApply: false
+---
+
+# Icon Button Tooltips
+
+Icon-only buttons must expose their action via hover tooltip. Do not rely on `title` alone.
+
+## Rules
+
+- Use `IconTipButton` from `@/components/ui/icon-tip-button` for icon-only actions
+- `label` must be a short Chinese verb phrase matching the action (e.g. `删除`, `回滚`, `对比`)
+- Always set `aria-label={label}` (handled by `IconTipButton`)
+- Prefer tooltip over visible text when space is tight; keep toolbar/list rows compact
+
+## Example
+
+```tsx
+import { IconTipButton } from "@/components/ui/icon-tip-button";
+import { Trash2 } from "lucide-react";
+
+<IconTipButton
+  size="icon"
+  variant="ghost"
+  className="h-7 w-7"
+  label="删除"
+  onClick={handleDelete}
+>
+  <Trash2 className="h-3.5 w-3.5" />
+</IconTipButton>
+```
+
+## Avoid
+
+```tsx
+// ❌ title only — inconsistent, poor a11y
+<Button size="icon" title="删除">...</Button>
+```

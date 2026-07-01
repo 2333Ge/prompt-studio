@@ -296,6 +296,20 @@ export class DexieVersionRepository implements VersionRepository {
   async getById(id: string): Promise<PromptVersion | null> {
     return (await getDb().versions.get(id)) ?? null;
   }
+
+  async delete(id: string): Promise<void> {
+    const db = getDb();
+    const version = await db.versions.get(id);
+    if (!version) return;
+
+    await db.transaction("rw", [db.prompts, db.versions], async () => {
+      const prompt = await db.prompts.get(version.promptId);
+      if (prompt?.currentVersionId === id) {
+        await db.prompts.update(version.promptId, { currentVersionId: null });
+      }
+      await db.versions.delete(id);
+    });
+  }
 }
 
 export class DexieResultRepository implements ResultRepository {
