@@ -24,7 +24,6 @@ interface InsertVariablePickerProps {
 interface VariableOption {
   key: string;
   label: string;
-  morph: "inline" | "flag";
   source: "global" | "schema";
   definition?: VariableFieldDefinition;
 }
@@ -48,7 +47,6 @@ export function InsertVariablePicker({ open, onOpenChange, prompt, onInsert }: I
       schemaItems.push({
         key,
         label: definition.title ?? key,
-        morph: definition.type === "flag" ? "flag" : "inline",
         source: "schema",
         definition,
       });
@@ -59,7 +57,6 @@ export function InsertVariablePicker({ open, onOpenChange, prompt, onInsert }: I
       globalItems.push({
         key: field.key,
         label: field.definition.title ?? field.key,
-        morph: field.morph,
         source: "global",
         definition: field.definition,
       });
@@ -83,7 +80,7 @@ export function InsertVariablePicker({ open, onOpenChange, prompt, onInsert }: I
   }, [globalFields, prompt.schema?.fields, search]);
 
   const handleSelect = (option: VariableOption) => {
-    onInsert(buildVariablePlaceholder(option.key, option.morph));
+    onInsert(buildVariablePlaceholder(option.key));
     onOpenChange(false);
   };
 
@@ -140,7 +137,10 @@ function VariableGroup({
           <div className="min-w-0 text-left">
             <p className="truncate font-medium">{option.label}</p>
             <p className="truncate font-mono text-xs text-muted-foreground">
-              {buildVariablePlaceholder(option.key, option.morph)}
+              {buildVariablePlaceholder(option.key)}
+              {option.definition?.prefixEnabled && option.definition.prefix
+                ? ` · 前缀 ${option.definition.prefix.trim()}`
+                : ""}
             </p>
           </div>
         </Button>

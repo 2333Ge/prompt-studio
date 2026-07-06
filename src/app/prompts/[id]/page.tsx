@@ -32,9 +32,9 @@ import {
 } from "@/lib/repositories/dexie-repositories";
 import { usePrivacyStore, useUIStore } from "@/lib/stores";
 import { cn, copyToClipboard } from "@/lib/utils";
-import { fillTemplate, parseVariables } from "@/lib/variables/parser";
+import { fillTemplate, parseVariables, createDefaultField } from "@/lib/variables/parser";
 import { syncSchemaFromContent } from "@/lib/variables/sync-schema";
-import type { Category, Tag } from "@/types";
+import type { Category, Tag, VariableFieldDefinition } from "@/types";
 import { VariableFormPanel } from "@/components/prompt/variable-form-panel";
 import { SchemaEditorPanel } from "@/components/prompt/schema-editor-panel";
 import { VersionPanel } from "@/components/prompt/version-panel";
@@ -77,7 +77,9 @@ export default function PromptEditorPage() {
   const [insertVariableOpen, setInsertVariableOpen] = useState(false);
   const [insertPromptOpen, setInsertPromptOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [draftFields, setDraftFields] = useState<Record<string, VariableFieldDefinition>>({});
   const initializedPromptId = useRef<string | null>(null);
+  const loadedFieldsKey = useRef<string | null>(null);
   const editorHandleRef = useRef<MonacoEditorHandle | null>(null);
 
   useEffect(() => {
@@ -107,13 +109,44 @@ export default function PromptEditorPage() {
     }
   }, [prompt, setVariableValues]);
 
+  useEffect(() => {
+    if (!prompt) return;
+    const fieldsKey = `${prompt.id}:${prompt.schema?.id ?? "none"}`;
+    if (loadedFieldsKey.current !== fieldsKey) {
+      setDraftFields(prompt.schema?.fields ?? {});
+      loadedFieldsKey.current = fieldsKey;
+    }
+  }, [prompt]);
+
   const parsedVariables = useMemo(() => parseVariables(localContent), [localContent]);
   const variableKey = useMemo(() => parsedVariables.join("\0"), [parsedVariables]);
-  const schemaFields = prompt?.schema?.fields ?? {};
+
+  useEffect(() => {
+    if (parsedVariables.length === 0) return;
+    setDraftFields((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const name of parsedVariables) {
+        if (!(name in next)) {
+          next[name] = prompt?.schema?.fields[name] ?? createDefaultField(name);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [parsedVariables, prompt?.schema?.fields]);
+
   const filledContent = useMemo(
-    () => fillTemplate(localContent, variableValues, schemaFields),
-    [localContent, variableValues, schemaFields],
+    () => fillTemplate(localContent, variableValues, draftFields),
+    [localContent, variableValues, draftFields],
   );
+
+  const updateDraftField = (name: string, patch: Partial<VariableFieldDefinition>) => {
+    setDraftFields((current) => ({
+      ...current,
+      [name]: { ...(current[name] ?? createDefaultField(name)), ...patch },
+    }));
+  };
 
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">加载中...</div>;
@@ -131,7 +164,7 @@ export default function PromptEditorPage() {
   }
 
   const handleSavePrompt = async () => {
-    const { schemaId } = await syncSchemaFromContent(localContent, localTitle, prompt.schema);
+    const { schemaId } = await syncSchemaFromContent(localContent, localTitle, prompt.schema, draftFields);
 
     await promptRepository.update(prompt.id, {
       title: localTitle,
@@ -160,7 +193,12 @@ export default function PromptEditorPage() {
   };
 
   const handleSaveVersion = async () => {
-    const { schemaId, fields } = await syncSchemaFromContent(localContent, localTitle, prompt.schema);
+    const { schemaId, fields } = await syncSchemaFromContent(
+      localContent,
+      localTitle,
+      prompt.schema,
+      draftFields,
+    );
     const version = await versionRepository.create({
       promptId: prompt.id,
       content: localContent,
@@ -334,13 +372,19 @@ export default function PromptEditorPage() {
               <TabsTrigger value="translation">翻译</TabsTrigger>
             </TabsList>
             <TabsContent value="variables" className="mt-4">
-              <VariableFormPanel prompt={prompt} variableKey={variableKey} />
+              <VariableFormPanel
+                prompt={prompt}
+                variableKey={variableKey}
+                fields={draftFields}
+                onUpdateField={updateDraftField}
+              />
             </TabsContent>
             <TabsContent value="schema" className="mt-4">
               <SchemaEditorPanel
                 prompt={prompt}
                 variableKey={variableKey}
-                content={localContent}
+                fields={draftFields}
+                onFieldsChange={setDraftFields}
                 onRefresh={refresh}
               />
             </TabsContent>

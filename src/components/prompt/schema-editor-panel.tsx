@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,56 +23,45 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { promptRepository, schemaRepository } from "@/lib/repositories/dexie-repositories";
-import { inferVariableMorph } from "@/lib/variables/parser";
-import { FIELD_TYPE_OPTIONS, FLAG_VALUE_TYPE_OPTIONS } from "@/lib/variables/schema-builder";
-import type { FlagValueType, PromptWithRelations, VariableFieldDefinition } from "@/types";
+import { createDefaultField } from "@/lib/variables/parser";
+import { FIELD_TYPE_OPTIONS } from "@/lib/variables/schema-builder";
+import { VariablePrefixControls } from "@/components/prompt/variable-prefix-controls";
+import type { PromptWithRelations, VariableFieldDefinition } from "@/types";
 
 interface SchemaEditorPanelProps {
   prompt: PromptWithRelations;
   variableKey: string;
-  content: string;
+  fields: Record<string, VariableFieldDefinition>;
+  onFieldsChange: (fields: Record<string, VariableFieldDefinition>) => void;
   onRefresh: () => Promise<void>;
 }
 
-export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: SchemaEditorPanelProps) {
-  const [fields, setFields] = useState<Record<string, VariableFieldDefinition>>({});
+export function SchemaEditorPanel({
+  prompt,
+  variableKey,
+  fields,
+  onFieldsChange,
+  onRefresh,
+}: SchemaEditorPanelProps) {
   const [overwriteDialogOpen, setOverwriteDialogOpen] = useState(false);
   const [linkedCount, setLinkedCount] = useState(0);
-  const loadedSchemaId = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (prompt.schema) {
-      if (loadedSchemaId.current !== prompt.schema.id) {
-        setFields(prompt.schema.fields);
-        loadedSchemaId.current = prompt.schema.id;
-      }
-    } else {
-      loadedSchemaId.current = null;
-    }
-  }, [prompt.schema?.id, prompt.schema]);
 
   const variableNames = variableKey ? variableKey.split("\0") : [];
 
   useEffect(() => {
     if (variableNames.length === 0) return;
 
-    setFields((current) => {
-      const next = { ...current };
-      let changed = false;
-      for (const name of variableNames) {
-        if (!(name in next)) {
-          const morph = inferVariableMorph(content, name);
-          next[name] =
-            prompt.schema?.fields[name] ??
-            (morph === "flag"
-              ? { type: "flag", title: name, required: false, valueType: "text", flag: `--${name}` }
-              : { type: "text", title: name, required: false });
-          changed = true;
-        }
+    let changed = false;
+    const next = { ...fields };
+    for (const name of variableNames) {
+      if (!(name in next)) {
+        next[name] = prompt.schema?.fields[name] ?? createDefaultField(name);
+        changed = true;
       }
-      return changed ? next : current;
-    });
-  }, [variableKey, prompt.schema, variableNames, content]);
+    }
+    if (changed) onFieldsChange(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variableKey, prompt.schema]);
 
   const persistSchema = async (saveAsCopy = false) => {
     if (saveAsCopy && prompt.schema) {
@@ -89,9 +78,6 @@ export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: S
       await promptRepository.update(prompt.id, { schemaId: schema.id });
     }
     await onRefresh();
-    if (prompt.schema) {
-      loadedSchemaId.current = prompt.schema.id;
-    }
   };
 
   const handleCreateOrUpdate = async () => {
@@ -107,10 +93,10 @@ export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: S
   };
 
   const updateField = (name: string, patch: Partial<VariableFieldDefinition>) => {
-    setFields((current) => ({
-      ...current,
-      [name]: { ...current[name], ...patch },
-    }));
+    onFieldsChange({
+      ...fields,
+      [name]: { ...fields[name], ...patch },
+    });
   };
 
   if (variableNames.length === 0) {
@@ -121,7 +107,6 @@ export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: S
     <div className="space-y-4">
       {variableNames.map((name) => {
         const field = fields[name] ?? { type: "text", title: name };
-        const isFlag = field.type === "flag";
         return (
           <Card key={name}>
             <CardHeader>
@@ -139,18 +124,7 @@ export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: S
                 <Label>类型</Label>
                 <Select
                   value={field.type}
-                  onValueChange={(value) => {
-                    const type = value as VariableFieldDefinition["type"];
-                    if (type === "flag") {
-                      updateField(name, {
-                        type,
-                        valueType: "text",
-                        flag: `--${name}`,
-                      });
-                    } else {
-                      updateField(name, { type });
-                    }
-                  }}
+                  onValueChange={(value) => updateField(name, { type: value as VariableFieldDefinition["type"] })}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -165,52 +139,24 @@ export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: S
                 </Select>
               </div>
 
-              {isFlag && (
-                <>
-                  <div className="space-y-2">
-                    <Label>参数前缀</Label>
-                    <Input
-                      value={field.flag ?? `--${name}`}
-                      onChange={(event) => updateField(name, { flag: event.target.value })}
-                      placeholder="--ar"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>值类型</Label>
-                    <Select
-                      value={field.valueType ?? "text"}
-                      onValueChange={(value) => updateField(name, { valueType: value as FlagValueType })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FLAG_VALUE_TYPE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                    <Label>默认值相同时省略</Label>
-                    <Switch
-                      checked={Boolean(field.omitIfDefault)}
-                      onCheckedChange={(checked) => updateField(name, { omitIfDefault: checked })}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                    <Label>保留在正文原位</Label>
-                    <Switch
-                      checked={Boolean(field.inlineFlag)}
-                      onCheckedChange={(checked) => updateField(name, { inlineFlag: checked })}
-                    />
-                  </div>
-                </>
-              )}
+              <VariablePrefixControls field={field} onChange={(patch) => updateField(name, patch)} />
 
-              {(field.type === "select" || (isFlag && field.valueType === "select")) && (
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <Label>默认值相同时省略</Label>
+                <Switch
+                  checked={Boolean(field.omitIfDefault)}
+                  onCheckedChange={(checked) => updateField(name, { omitIfDefault: checked })}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <Label>保留在正文原位</Label>
+                <Switch
+                  checked={Boolean(field.inlinePrefix)}
+                  onCheckedChange={(checked) => updateField(name, { inlinePrefix: checked })}
+                />
+              </div>
+
+              {field.type === "select" && (
                 <div className="space-y-2">
                   <Label>选项（逗号分隔）</Label>
                   <Input
@@ -227,7 +173,7 @@ export function SchemaEditorPanel({ prompt, variableKey, content, onRefresh }: S
                 </div>
               )}
 
-              {isFlag && field.valueType === "number" && (
+              {field.type === "number" && (
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-2">
                     <Label>最小值</Label>

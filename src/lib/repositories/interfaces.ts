@@ -65,8 +65,8 @@ export interface GlobalVariableFieldRepository {
   getAll(): Promise<GlobalVariableField[]>;
   getById(id: string): Promise<GlobalVariableField | null>;
   getByKey(key: string): Promise<GlobalVariableField | null>;
-  create(input: Pick<GlobalVariableField, "key" | "morph" | "definition"> & Partial<Pick<GlobalVariableField, "tags">>): Promise<GlobalVariableField>;
-  update(id: string, input: Partial<Pick<GlobalVariableField, "key" | "morph" | "definition" | "tags">>): Promise<GlobalVariableField>;
+  create(input: Pick<GlobalVariableField, "key" | "definition"> & Partial<Pick<GlobalVariableField, "tags">>): Promise<GlobalVariableField>;
+  update(id: string, input: Partial<Pick<GlobalVariableField, "key" | "definition" | "tags">>): Promise<GlobalVariableField>;
   delete(id: string): Promise<void>;
 }
 

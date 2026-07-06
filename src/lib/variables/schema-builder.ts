@@ -1,4 +1,4 @@
-import { createDefaultField, inferVariableMorph } from "@/lib/variables/parser";
+import { createDefaultField } from "@/lib/variables/parser";
 import type { VariableFieldDefinition, VariableFieldType, VariableSchema } from "@/types";
 
 type JsonSchemaProperty = {
@@ -48,12 +48,6 @@ function mapFieldToProperty(field: VariableFieldDefinition): JsonSchemaProperty 
       return { ...base, type: "string", format: "date", widget: "date" };
     case "image":
       return { ...base, type: "string", widget: "url", description: field.description ?? "图片 URL 或上传" };
-    case "flag":
-      return {
-        ...base,
-        type: field.valueType === "number" ? "number" : "string",
-        enum: field.valueType === "select" ? field.options ?? [] : undefined,
-      };
     default:
       return { ...base, type: "string" };
   }
@@ -62,12 +56,10 @@ function mapFieldToProperty(field: VariableFieldDefinition): JsonSchemaProperty 
 export function createSchemaFromVariables(
   name: string,
   variableNames: string[],
-  content?: string,
 ): Pick<VariableSchema, "name" | "fields"> {
   const fields: Record<string, VariableFieldDefinition> = {};
   for (const variable of variableNames) {
-    const morph = content ? inferVariableMorph(content, variable) : "inline";
-    fields[variable] = createDefaultField(variable, morph);
+    fields[variable] = createDefaultField(variable);
   }
   return { name, fields };
 }
@@ -79,11 +71,4 @@ export const FIELD_TYPE_OPTIONS: { value: VariableFieldType; label: string }[] =
   { value: "number", label: "数字" },
   { value: "date", label: "日期" },
   { value: "image", label: "图片" },
-  { value: "flag", label: "CLI 参数" },
 ];
-
-export const FLAG_VALUE_TYPE_OPTIONS = [
-  { value: "text", label: "文本" },
-  { value: "select", label: "下拉选择" },
-  { value: "number", label: "数字" },
-] as const;

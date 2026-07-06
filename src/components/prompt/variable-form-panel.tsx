@@ -14,14 +14,22 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mediaStorageAdapter } from "@/lib/storage/media-adapter";
 import { useUIStore } from "@/lib/stores";
-import type { FlagValueType, PromptWithRelations, VariableFieldDefinition } from "@/types";
+import { VariablePrefixControls } from "@/components/prompt/variable-prefix-controls";
+import type { PromptWithRelations, VariableFieldDefinition } from "@/types";
 
 interface VariableFormPanelProps {
   prompt: PromptWithRelations;
   variableKey: string;
+  fields: Record<string, VariableFieldDefinition>;
+  onUpdateField: (name: string, patch: Partial<VariableFieldDefinition>) => void;
 }
 
-export function VariableFormPanel({ prompt, variableKey }: VariableFormPanelProps) {
+export function VariableFormPanel({
+  prompt,
+  variableKey,
+  fields,
+  onUpdateField,
+}: VariableFormPanelProps) {
   const variableValues = useUIStore((state) => state.variableValues);
   const setVariableValues = useUIStore((state) => state.setVariableValues);
   const initializedFor = useRef<string | null>(null);
@@ -34,7 +42,7 @@ export function VariableFormPanel({ prompt, variableKey }: VariableFormPanelProp
       initializedFor.current = initKey;
       const initial: Record<string, unknown> = {};
       for (const name of variableNames) {
-        const field = prompt.schema?.fields[name];
+        const field = fields[name] ?? prompt.schema?.fields[name];
         initial[name] = field?.default ?? "";
       }
       setVariableValues(initial);
@@ -46,14 +54,14 @@ export function VariableFormPanel({ prompt, variableKey }: VariableFormPanelProp
       const next = { ...current };
       for (const name of variableNames) {
         if (!(name in next)) {
-          const field = prompt.schema?.fields[name];
+          const field = fields[name] ?? prompt.schema?.fields[name];
           next[name] = field?.default ?? "";
           changed = true;
         }
       }
       return changed ? next : current;
     });
-  }, [prompt.id, prompt.schema, prompt.schema?.id, setVariableValues, variableKey]);
+  }, [fields, prompt.id, prompt.schema, prompt.schema?.id, setVariableValues, variableKey]);
 
   const variableNames = variableKey ? variableKey.split("\0") : [];
 
@@ -72,7 +80,7 @@ export function VariableFormPanel({ prompt, variableKey }: VariableFormPanelProp
       </CardHeader>
       <CardContent className="space-y-4">
         {variableNames.map((name) => {
-          const field = prompt.schema?.fields[name] ?? { type: "text", title: name };
+          const field = fields[name] ?? prompt.schema?.fields[name] ?? { type: "text", title: name };
           return (
             <VariableField
               key={name}
@@ -80,6 +88,7 @@ export function VariableFormPanel({ prompt, variableKey }: VariableFormPanelProp
               field={field}
               value={variableValues[name]}
               onChange={(value) => updateValue(name, value)}
+              onFieldChange={(patch) => onUpdateField(name, patch)}
             />
           );
         })}
@@ -93,42 +102,25 @@ function VariableField({
   field,
   value,
   onChange,
+  onFieldChange,
 }: {
   name: string;
   field: VariableFieldDefinition;
   value: unknown;
   onChange: (value: unknown) => void;
+  onFieldChange: (patch: Partial<VariableFieldDefinition>) => void;
 }) {
   const label = field.title ?? name;
   const hint = field.hint ?? field.description;
 
-  if (field.type === "flag") {
-    return (
-      <FlagValueField
-        name={name}
-        label={label}
-        hint={hint}
-        field={field}
-        value={value}
-        onChange={onChange}
-      />
-    );
-  }
-
-  switch (field.type) {
-    case "textarea":
-      return (
-        <div className="space-y-2">
-          <Label>{label}</Label>
-          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+  const valueControl = (() => {
+    switch (field.type) {
+      case "textarea":
+        return (
           <Textarea value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
-        </div>
-      );
-    case "select":
-      return (
-        <div className="space-y-2">
-          <Label>{label}</Label>
-          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        );
+      case "select":
+        return (
           <Select value={String(value ?? "")} onValueChange={onChange}>
             <SelectTrigger>
               <SelectValue placeholder="请选择" />
@@ -141,13 +133,9 @@ function VariableField({
               ))}
             </SelectContent>
           </Select>
-        </div>
-      );
-    case "number":
-      return (
-        <div className="space-y-2">
-          <Label>{label}</Label>
-          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        );
+      case "number":
+        return (
           <Input
             type="number"
             min={field.min}
@@ -155,99 +143,42 @@ function VariableField({
             value={value == null ? "" : String(value)}
             onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
           />
-        </div>
-      );
-    case "date":
-      return (
-        <div className="space-y-2">
-          <Label>{label}</Label>
-          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        );
+      case "date":
+        return (
           <Input type="date" value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
-        </div>
-      );
-    case "image":
-      return (
-        <div className="space-y-2">
-          <Label>{label}</Label>
-          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-          <Input
-            value={String(value ?? "")}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="图片 URL"
-          />
-          <Input
-            type="file"
-            accept="image/*"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              const url = await mediaStorageAdapter.upload(file);
-              onChange(url);
-            }}
-          />
-        </div>
-      );
-    default:
-      return (
-        <div className="space-y-2">
-          <Label>{label}</Label>
-          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-          <Input value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
-        </div>
-      );
-  }
-}
-
-function FlagValueField({
-  name,
-  label,
-  hint,
-  field,
-  value,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  hint?: string;
-  field: VariableFieldDefinition;
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  const valueType: FlagValueType = field.valueType ?? "text";
-  const flagLabel = field.flag ?? `--${name}`;
+        );
+      case "image":
+        return (
+          <>
+            <Input
+              value={String(value ?? "")}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder="图片 URL"
+            />
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const url = await mediaStorageAdapter.upload(file);
+                onChange(url);
+              }}
+            />
+          </>
+        );
+      default:
+        return <Input value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
+    }
+  })();
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Label>{label}</Label>
-        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{flagLabel}</span>
-      </div>
+      <Label>{label}</Label>
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-
-      {valueType === "select" ? (
-        <Select value={String(value ?? "")} onValueChange={onChange}>
-          <SelectTrigger>
-            <SelectValue placeholder="请选择" />
-          </SelectTrigger>
-          <SelectContent>
-            {(field.options ?? []).map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : valueType === "number" ? (
-        <Input
-          type="number"
-          min={field.min}
-          max={field.max}
-          value={value == null ? "" : String(value)}
-          onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
-        />
-      ) : (
-        <Input value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
-      )}
+      {valueControl}
+      <VariablePrefixControls field={field} onChange={onFieldChange} compact />
     </div>
   );
 }

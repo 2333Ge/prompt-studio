@@ -1,34 +1,17 @@
 import type { VariableFieldDefinition } from "@/types";
 
-const INLINE_PATTERN = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
-const FLAG_PATTERN = /\[\[\s*([^\]]+?)\s*\]\]/g;
+const VARIABLE_TOKEN = /[\p{L}_][\p{L}\p{N}_-]*/u;
+const INLINE_PATTERN = new RegExp(`\\{\\{\\s*(${VARIABLE_TOKEN.source})\\s*\\}\\}`, "gu");
 
-export function normalizeFlagKey(token: string): string {
-  const trimmed = token.trim();
-  return trimmed.startsWith("--") ? trimmed.slice(2) : trimmed;
+export function parseVariableToken(raw: string): string {
+  return raw.trim();
 }
 
-export function parseInlineVariables(content: string): string[] {
-  const names = new Set<string>();
-  for (const match of content.matchAll(INLINE_PATTERN)) {
-    names.add(match[1]);
-  }
-  return Array.from(names);
-}
-
-export function parseFlagVariables(content: string): string[] {
-  const names = new Set<string>();
-  for (const match of content.matchAll(FLAG_PATTERN)) {
-    names.add(normalizeFlagKey(match[1]));
-  }
-  return Array.from(names);
-}
-
-/** All variable keys referenced in content (inline + flag, normalized). */
 export function parseVariables(content: string): string[] {
   const names = new Set<string>();
-  for (const name of parseInlineVariables(content)) names.add(name);
-  for (const name of parseFlagVariables(content)) names.add(name);
+  for (const match of content.matchAll(INLINE_PATTERN)) {
+    names.add(parseVariableToken(match[1]));
+  }
   return Array.from(names);
 }
 
@@ -45,35 +28,25 @@ function formatValue(value: unknown): string | null {
   return String(value);
 }
 
-function getFlagPrefix(name: string, field?: VariableFieldDefinition): string {
-  if (field?.flag) return field.flag;
-  return `--${name}`;
-}
-
-function shouldOmitFlag(
-  value: unknown,
-  field: VariableFieldDefinition | undefined,
-): boolean {
+function shouldOmitValue(value: unknown, field: VariableFieldDefinition | undefined): boolean {
   if (!field?.omitIfDefault || field.default === undefined) return false;
   const formatted = formatValue(value);
   if (formatted == null) return field.default === "" || field.default == null;
   return String(formatted) === String(field.default);
 }
 
-function formatFlagSegment(
-  name: string,
+function formatPrefixedSegment(
   value: unknown,
-  field?: VariableFieldDefinition,
+  field: VariableFieldDefinition | undefined,
+  prefix: string,
 ): string | null {
-  if (shouldOmitFlag(value, field)) return null;
+  if (shouldOmitValue(value, field)) return null;
   const formatted = formatValue(value);
   if (formatted == null) return null;
-  const prefix = getFlagPrefix(name, field);
-  return `${prefix} ${formatted}`;
+  return `${prefix}${formatted}`;
 }
 
-export function buildVariablePlaceholder(key: string, morph: "inline" | "flag"): string {
-  if (morph === "flag") return `[[ --${key} ]]`;
+export function buildVariablePlaceholder(key: string): string {
   return `{{${key}}}`;
 }
 
@@ -82,63 +55,38 @@ export function fillTemplate(
   values: Record<string, unknown>,
   fields?: Record<string, VariableFieldDefinition>,
 ): string {
-  let body = content.replace(INLINE_PATTERN, (_, name: string) => {
-    const formatted = formatValue(values[name]);
-    if (formatted == null) return `{{${name}}}`;
-    return formatted;
-  });
+  const trailingSegments: string[] = [];
 
-  const flagSegments: string[] = [];
-  const inlineFlags: string[] = [];
+  let body = content.replace(INLINE_PATTERN, (_, rawToken: string) => {
+    const key = parseVariableToken(rawToken);
+    const field = fields?.[key];
 
-  body = body.replace(FLAG_PATTERN, (_, rawToken: string) => {
-    const name = normalizeFlagKey(rawToken);
-    const field = fields?.[name];
-    const segment = formatFlagSegment(name, values[name], field);
-    if (segment == null) return "";
-
-    if (field?.inlineFlag) {
-      inlineFlags.push(segment);
-      return segment;
+    if (field?.prefixEnabled && field.prefix) {
+      const segment = formatPrefixedSegment(values[key], field, field.prefix);
+      if (segment == null) return "";
+      if (field.inlinePrefix) return segment;
+      trailingSegments.push(segment);
+      return "";
     }
 
-    flagSegments.push(segment);
-    return "";
+    const formatted = formatValue(values[key]);
+    if (formatted == null) return `{{${key}}}`;
+    return formatted;
   });
 
   body = body.replace(/[ \t]+\n/g, "\n").replace(/  +/g, " ").trim();
 
-  const trailingFlags = [...inlineFlags, ...flagSegments];
-  if (trailingFlags.length === 0) return body;
+  if (trailingSegments.length === 0) return body;
 
-  const flagBlock = trailingFlags.join(" ");
-  if (!body) return flagBlock;
-  return `${body} ${flagBlock}`;
+  const suffix = trailingSegments.join(" ");
+  if (!body) return suffix;
+  return `${body} ${suffix}`;
 }
 
-export function createDefaultField(name: string, morph: "inline" | "flag" = "inline") {
-  if (morph === "flag") {
-    return {
-      type: "flag" as const,
-      title: name,
-      required: false,
-      valueType: "text" as const,
-      flag: `--${name}`,
-    };
-  }
+export function createDefaultField(name: string): VariableFieldDefinition {
   return {
-    type: "text" as const,
+    type: "text",
     title: name,
     required: false,
   };
-}
-
-export function inferVariableMorph(
-  content: string,
-  name: string,
-): "inline" | "flag" {
-  for (const match of content.matchAll(FLAG_PATTERN)) {
-    if (normalizeFlagKey(match[1]) === name) return "flag";
-  }
-  return "inline";
 }

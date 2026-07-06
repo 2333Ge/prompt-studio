@@ -4,12 +4,7 @@ export type VariableFieldType =
   | "select"
   | "number"
   | "date"
-  | "image"
-  | "flag";
-
-export type VariableMorph = "inline" | "flag";
-
-export type FlagValueType = "select" | "number" | "text";
+  | "image";
 
 export interface VariableFieldDefinition {
   type: VariableFieldType;
@@ -18,16 +13,17 @@ export interface VariableFieldDefinition {
   required?: boolean;
   default?: string | number;
   options?: string[];
-  /** CLI flag prefix, e.g. "--ar". Defaults to --{name} for flag fields. */
-  flag?: string;
-  /** Widget type when type is "flag". */
-  valueType?: FlagValueType;
+  /** 是否启用前缀输出 */
+  prefixEnabled?: boolean;
+  /** 手动输入的前缀，如 "--ar " */
+  prefix?: string;
+  /** true=占位符原位输出；false=剥离后追加到文末 */
+  inlinePrefix?: boolean;
   omitIfDefault?: boolean;
   min?: number;
   max?: number;
   /** Chinese hint, e.g. "推荐 300，范围 0-1000" */
   hint?: string;
-  inlineFlag?: boolean;
 }
 
 export interface VariableSchema {
@@ -42,7 +38,6 @@ export interface VariableSchema {
 export interface GlobalVariableField {
   id: string;
   key: string;
-  morph: VariableMorph;
   definition: VariableFieldDefinition;
   tags: string[];
   createdAt: string;

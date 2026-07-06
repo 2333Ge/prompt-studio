@@ -30,15 +30,9 @@ import {
   schemaRepository,
 } from "@/lib/repositories/dexie-repositories";
 import { buildVariablePlaceholder } from "@/lib/variables/parser";
-import { FIELD_TYPE_OPTIONS, FLAG_VALUE_TYPE_OPTIONS } from "@/lib/variables/schema-builder";
-import type {
-  FlagValueType,
-  GlobalVariableField,
-  VariableFieldDefinition,
-  VariableFieldType,
-  VariableMorph,
-  VariableSchema,
-} from "@/types";
+import { FIELD_TYPE_OPTIONS } from "@/lib/variables/schema-builder";
+import { VariablePrefixControls } from "@/components/prompt/variable-prefix-controls";
+import type { GlobalVariableField, VariableFieldDefinition, VariableFieldType, VariableSchema } from "@/types";
 
 const defaultDefinition = (type: VariableFieldType = "text"): VariableFieldDefinition => ({
   type,
@@ -55,7 +49,6 @@ export default function VariablesPage() {
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
   const [editingField, setEditingField] = useState<GlobalVariableField | null>(null);
   const [fieldKey, setFieldKey] = useState("");
-  const [fieldMorph, setFieldMorph] = useState<VariableMorph>("inline");
   const [fieldDefinition, setFieldDefinition] = useState<VariableFieldDefinition>(defaultDefinition());
 
   const [schemaDialogOpen, setSchemaDialogOpen] = useState(false);
@@ -100,7 +93,6 @@ export default function VariablesPage() {
   const openCreateField = () => {
     setEditingField(null);
     setFieldKey("");
-    setFieldMorph("inline");
     setFieldDefinition(defaultDefinition());
     setFieldDialogOpen(true);
   };
@@ -108,7 +100,6 @@ export default function VariablesPage() {
   const openEditField = (field: GlobalVariableField) => {
     setEditingField(field);
     setFieldKey(field.key);
-    setFieldMorph(field.morph);
     setFieldDefinition({ ...field.definition });
     setFieldDialogOpen(true);
   };
@@ -118,19 +109,16 @@ export default function VariablesPage() {
     const definition = {
       ...fieldDefinition,
       title: fieldDefinition.title || fieldKey.trim(),
-      type: fieldMorph === "flag" ? "flag" : fieldDefinition.type === "flag" ? "text" : fieldDefinition.type,
     } as VariableFieldDefinition;
 
     if (editingField) {
       await globalVariableFieldRepository.update(editingField.id, {
         key: fieldKey.trim(),
-        morph: fieldMorph,
         definition,
       });
     } else {
       await globalVariableFieldRepository.create({
         key: fieldKey.trim(),
-        morph: fieldMorph,
         definition,
       });
     }
@@ -218,7 +206,10 @@ export default function VariablesPage() {
                   <div className="space-y-1">
                     <p className="font-medium">{field.definition.title ?? field.key}</p>
                     <p className="font-mono text-xs text-muted-foreground">
-                      {buildVariablePlaceholder(field.key, field.morph)}
+                      {buildVariablePlaceholder(field.key)}
+                      {field.definition.prefixEnabled && field.definition.prefix
+                        ? ` · 前缀 ${field.definition.prefix.trim()}`
+                        : ""}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       类型: {field.definition.type}
@@ -293,19 +284,7 @@ export default function VariablesPage() {
               <Label>变量 key</Label>
               <Input value={fieldKey} onChange={(event) => setFieldKey(event.target.value)} placeholder="ar" />
             </div>
-            <div className="space-y-2">
-              <Label>形态</Label>
-              <Select value={fieldMorph} onValueChange={(value) => setFieldMorph(value as VariableMorph)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inline">行内 {"{{key}}"}</SelectItem>
-                  <SelectItem value="flag">参数 {"[[ --key ]]"}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <FieldDefinitionEditor definition={fieldDefinition} morph={fieldMorph} onChange={setFieldDefinition} />
+            <FieldDefinitionEditor definition={fieldDefinition} onChange={setFieldDefinition} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFieldDialogOpen(false)}>
@@ -371,15 +350,11 @@ export default function VariablesPage() {
 
 function FieldDefinitionEditor({
   definition,
-  morph,
   onChange,
 }: {
   definition: VariableFieldDefinition;
-  morph: VariableMorph;
   onChange: (definition: VariableFieldDefinition) => void;
 }) {
-  const isFlag = morph === "flag" || definition.type === "flag";
-
   return (
     <>
       <div className="space-y-2">
@@ -389,64 +364,36 @@ function FieldDefinitionEditor({
           onChange={(event) => onChange({ ...definition, title: event.target.value })}
         />
       </div>
-      {!isFlag && (
-        <div className="space-y-2">
-          <Label>类型</Label>
-          <Select
-            value={definition.type}
-            onValueChange={(value) => onChange({ ...definition, type: value as VariableFieldType })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {FIELD_TYPE_OPTIONS.filter((item) => item.value !== "flag").map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      {isFlag && (
-        <>
-          <div className="space-y-2">
-            <Label>参数前缀</Label>
-            <Input
-              value={definition.flag ?? ""}
-              onChange={(event) => onChange({ ...definition, flag: event.target.value })}
-              placeholder="--ar"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>值类型</Label>
-            <Select
-              value={definition.valueType ?? "text"}
-              onValueChange={(value) => onChange({ ...definition, valueType: value as FlagValueType })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FLAG_VALUE_TYPE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-            <Label>默认值相同时省略</Label>
-            <Switch
-              checked={Boolean(definition.omitIfDefault)}
-              onCheckedChange={(checked) => onChange({ ...definition, omitIfDefault: checked })}
-            />
-          </div>
-        </>
-      )}
-      {(definition.type === "select" || (isFlag && definition.valueType === "select")) && (
+      <div className="space-y-2">
+        <Label>类型</Label>
+        <Select
+          value={definition.type}
+          onValueChange={(value) => onChange({ ...definition, type: value as VariableFieldType })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FIELD_TYPE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <VariablePrefixControls field={definition} onChange={(patch) => onChange({ ...definition, ...patch })} />
+
+      <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+        <Label>默认值相同时省略</Label>
+        <Switch
+          checked={Boolean(definition.omitIfDefault)}
+          onCheckedChange={(checked) => onChange({ ...definition, omitIfDefault: checked })}
+        />
+      </div>
+
+      {definition.type === "select" && (
         <div className="space-y-2">
           <Label>选项（逗号分隔）</Label>
           <Input
@@ -463,6 +410,38 @@ function FieldDefinitionEditor({
           />
         </div>
       )}
+
+      {definition.type === "number" && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-2">
+            <Label>最小值</Label>
+            <Input
+              type="number"
+              value={definition.min ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...definition,
+                  min: event.target.value === "" ? undefined : Number(event.target.value),
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>最大值</Label>
+            <Input
+              type="number"
+              value={definition.max ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...definition,
+                  max: event.target.value === "" ? undefined : Number(event.target.value),
+                })
+              }
+            />
+          </div>
+        </div>
+      )}
+
       <div className="space-y-2">
         <Label>默认值</Label>
         <Input

@@ -438,13 +438,12 @@ export class DexieGlobalVariableFieldRepository implements GlobalVariableFieldRe
   }
 
   async create(
-    input: Pick<GlobalVariableField, "key" | "morph" | "definition"> & Partial<Pick<GlobalVariableField, "tags">>,
+    input: Pick<GlobalVariableField, "key" | "definition"> & Partial<Pick<GlobalVariableField, "tags">>,
   ): Promise<GlobalVariableField> {
     const timestamp = now();
     const field: GlobalVariableField = {
       id: generateId(),
       key: input.key,
-      morph: input.morph,
       definition: input.definition,
       tags: input.tags ?? [],
       createdAt: timestamp,
@@ -456,7 +455,7 @@ export class DexieGlobalVariableFieldRepository implements GlobalVariableFieldRe
 
   async update(
     id: string,
-    input: Partial<Pick<GlobalVariableField, "key" | "morph" | "definition" | "tags">>,
+    input: Partial<Pick<GlobalVariableField, "key" | "definition" | "tags">>,
   ): Promise<GlobalVariableField> {
     const existing = await getDb().globalVariableFields.get(id);
     if (!existing) throw new Error("Global variable field not found");
