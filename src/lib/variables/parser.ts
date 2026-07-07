@@ -28,22 +28,16 @@ function formatValue(value: unknown): string | null {
   return String(value);
 }
 
-function shouldOmitValue(value: unknown, field: VariableFieldDefinition | undefined): boolean {
-  if (!field?.omitIfDefault || field.default === undefined) return false;
-  const formatted = formatValue(value);
-  if (formatted == null) return field.default === "" || field.default == null;
-  return String(formatted) === String(field.default);
+function joinPrefixAndValue(prefix: string, formatted: string): string {
+  if (!prefix) return formatted;
+  if (/\s$/.test(prefix)) return `${prefix}${formatted}`;
+  return `${prefix} ${formatted}`;
 }
 
-function formatPrefixedSegment(
-  value: unknown,
-  field: VariableFieldDefinition | undefined,
-  prefix: string,
-): string | null {
-  if (shouldOmitValue(value, field)) return null;
+function formatPrefixedSegment(value: unknown, prefix: string): string | null {
   const formatted = formatValue(value);
   if (formatted == null) return null;
-  return `${prefix}${formatted}`;
+  return joinPrefixAndValue(prefix, formatted);
 }
 
 export function buildVariablePlaceholder(key: string): string {
@@ -55,18 +49,14 @@ export function fillTemplate(
   values: Record<string, unknown>,
   fields?: Record<string, VariableFieldDefinition>,
 ): string {
-  const trailingSegments: string[] = [];
-
   let body = content.replace(INLINE_PATTERN, (_, rawToken: string) => {
     const key = parseVariableToken(rawToken);
     const field = fields?.[key];
 
     if (field?.prefixEnabled && field.prefix) {
-      const segment = formatPrefixedSegment(values[key], field, field.prefix);
+      const segment = formatPrefixedSegment(values[key], field.prefix);
       if (segment == null) return "";
-      if (field.inlinePrefix) return segment;
-      trailingSegments.push(segment);
-      return "";
+      return segment;
     }
 
     const formatted = formatValue(values[key]);
@@ -74,13 +64,7 @@ export function fillTemplate(
     return formatted;
   });
 
-  body = body.replace(/[ \t]+\n/g, "\n").replace(/  +/g, " ").trim();
-
-  if (trailingSegments.length === 0) return body;
-
-  const suffix = trailingSegments.join(" ");
-  if (!body) return suffix;
-  return `${body} ${suffix}`;
+  return body.replace(/[ \t]+\n/g, "\n").replace(/  +/g, " ").trim();
 }
 
 export function createDefaultField(name: string): VariableFieldDefinition {

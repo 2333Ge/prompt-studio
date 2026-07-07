@@ -10,81 +10,74 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { globalVariableFieldRepository } from "@/lib/repositories/dexie-repositories";
+import { schemaRepository } from "@/lib/repositories/dexie-repositories";
 import { buildVariablePlaceholder } from "@/lib/variables/parser";
-import type { GlobalVariableField, PromptWithRelations, VariableFieldDefinition } from "@/types";
+import type { VariableFieldDefinition, VariableSchema } from "@/types";
 
 interface InsertVariablePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  prompt: PromptWithRelations;
-  onInsert: (text: string) => void;
+  onInsert: (key: string, definition: VariableFieldDefinition) => void;
 }
 
 interface VariableOption {
   key: string;
   label: string;
-  source: "global" | "schema";
-  definition?: VariableFieldDefinition;
+  templateName: string;
+  definition: VariableFieldDefinition;
 }
 
-export function InsertVariablePicker({ open, onOpenChange, prompt, onInsert }: InsertVariablePickerProps) {
+export function InsertVariablePicker({ open, onOpenChange, onInsert }: InsertVariablePickerProps) {
   const [search, setSearch] = useState("");
-  const [globalFields, setGlobalFields] = useState<GlobalVariableField[]>([]);
+  const [templates, setTemplates] = useState<VariableSchema[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    void globalVariableFieldRepository.getAll().then(setGlobalFields);
+    void schemaRepository.getTemplates().then(setTemplates);
     setSearch("");
   }, [open]);
 
-  const { schemaOptions, globalOptions } = useMemo(() => {
-    const schemaItems: VariableOption[] = [];
-    const globalItems: VariableOption[] = [];
-    const schemaKeys = new Set(Object.keys(prompt.schema?.fields ?? {}));
-
-    for (const [key, definition] of Object.entries(prompt.schema?.fields ?? {})) {
-      schemaItems.push({
-        key,
-        label: definition.title ?? key,
-        source: "schema",
-        definition,
-      });
-    }
-
-    for (const field of globalFields) {
-      if (schemaKeys.has(field.key)) continue;
-      globalItems.push({
-        key: field.key,
-        label: field.definition.title ?? field.key,
-        source: "global",
-        definition: field.definition,
-      });
-    }
-
+  const groupedOptions = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    const filterItems = (items: VariableOption[]) =>
-      keyword
-        ? items.filter(
-            (item) =>
-              item.key.toLowerCase().includes(keyword) ||
-              item.label.toLowerCase().includes(keyword) ||
-              item.definition?.hint?.toLowerCase().includes(keyword),
-          )
-        : items;
+    const groups = new Map<string, VariableOption[]>();
 
-    return {
-      schemaOptions: filterItems(schemaItems).sort((a, b) => a.key.localeCompare(b.key)),
-      globalOptions: filterItems(globalItems).sort((a, b) => a.key.localeCompare(b.key)),
-    };
-  }, [globalFields, prompt.schema?.fields, search]);
+    for (const template of templates) {
+      for (const [key, definition] of Object.entries(template.fields)) {
+        const label = definition.title ?? key;
+        if (
+          keyword &&
+          !key.toLowerCase().includes(keyword) &&
+          !label.toLowerCase().includes(keyword) &&
+          !definition.hint?.toLowerCase().includes(keyword)
+        ) {
+          continue;
+        }
+
+        const items = groups.get(template.name) ?? [];
+        items.push({
+          key,
+          label,
+          templateName: template.name,
+          definition,
+        });
+        groups.set(template.name, items);
+      }
+    }
+
+    for (const [name, items] of groups) {
+      items.sort((a, b) => a.key.localeCompare(b.key));
+      groups.set(name, items);
+    }
+
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [search, templates]);
 
   const handleSelect = (option: VariableOption) => {
-    onInsert(buildVariablePlaceholder(option.key));
+    onInsert(option.key, structuredClone(option.definition));
     onOpenChange(false);
   };
 
-  const hasResults = schemaOptions.length > 0 || globalOptions.length > 0;
+  const hasResults = groupedOptions.some(([, items]) => items.length > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -99,14 +92,18 @@ export function InsertVariablePicker({ open, onOpenChange, prompt, onInsert }: I
           placeholder="搜索变量名、标题..."
         />
         <div className="max-h-80 space-y-3 overflow-auto">
-          {schemaOptions.length > 0 && (
-            <VariableGroup title="当前 Schema" options={schemaOptions} onSelect={handleSelect} />
-          )}
-          {globalOptions.length > 0 && (
-            <VariableGroup title="全局字段库" options={globalOptions} onSelect={handleSelect} />
-          )}
+          {groupedOptions.map(([templateName, options]) => (
+            <VariableGroup
+              key={templateName}
+              title={templateName}
+              options={options}
+              onSelect={handleSelect}
+            />
+          ))}
           {!hasResults && (
-            <p className="py-6 text-center text-sm text-muted-foreground">没有匹配的变量</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {templates.length === 0 ? "暂无全局 Schema 模板" : "没有匹配的变量"}
+            </p>
           )}
         </div>
       </DialogContent>
@@ -123,6 +120,8 @@ function VariableGroup({
   options: VariableOption[];
   onSelect: (option: VariableOption) => void;
 }) {
+  if (options.length === 0) return null;
+
   return (
     <div className="space-y-1">
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
@@ -138,7 +137,7 @@ function VariableGroup({
             <p className="truncate font-medium">{option.label}</p>
             <p className="truncate font-mono text-xs text-muted-foreground">
               {buildVariablePlaceholder(option.key)}
-              {option.definition?.prefixEnabled && option.definition.prefix
+              {option.definition.prefixEnabled && option.definition.prefix
                 ? ` · 前缀 ${option.definition.prefix.trim()}`
                 : ""}
             </p>

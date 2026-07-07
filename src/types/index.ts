@@ -17,9 +17,6 @@ export interface VariableFieldDefinition {
   prefixEnabled?: boolean;
   /** 手动输入的前缀，如 "--ar " */
   prefix?: string;
-  /** true=占位符原位输出；false=剥离后追加到文末 */
-  inlinePrefix?: boolean;
-  omitIfDefault?: boolean;
   min?: number;
   max?: number;
   /** Chinese hint, e.g. "推荐 300，范围 0-1000" */
@@ -31,15 +28,6 @@ export interface VariableSchema {
   name: string;
   fields: Record<string, VariableFieldDefinition>;
   isTemplate?: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface GlobalVariableField {
-  id: string;
-  key: string;
-  definition: VariableFieldDefinition;
-  tags: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -130,7 +118,6 @@ export interface ExportBundle {
   tags: Tag[];
   promptTags: PromptTag[];
   variableSchemas: VariableSchema[];
-  globalVariableFields?: GlobalVariableField[];
   versions: PromptVersion[];
   results: PromptResult[];
 }
@@ -138,10 +125,9 @@ export interface ExportBundle {
 export type ImportConflictStrategy = "skip" | "overwrite" | "rename";
 
 export interface TranslationSettings {
-  provider: "deepl" | "google" | "iframe";
   apiKey: string;
+  textModel: string;
   targetLanguage: string;
-  iframeUrl: string;
 }
 
 export interface AppSettings {

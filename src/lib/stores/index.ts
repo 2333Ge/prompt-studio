@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { hashPassword, verifyPassword } from "@/lib/privacy/password";
+import { DEFAULT_TEXT_MODEL } from "@/lib/siliconflow/models";
 import type { PromptQueryOptions, PromptWithRelations } from "@/types";
 
 interface UIState {
@@ -125,27 +126,23 @@ export const usePrivacyStore = create<PrivacyState>()(
 );
 
 interface SettingsState {
-  translationProvider: "deepl" | "google" | "iframe";
-  translationApiKey: string;
+  siliconflowApiKey: string;
+  siliconflowTextModel: string;
   translationTargetLanguage: string;
-  translationIframeUrl: string;
-  setTranslationProvider: (provider: SettingsState["translationProvider"]) => void;
-  setTranslationApiKey: (key: string) => void;
+  setSiliconflowApiKey: (key: string) => void;
+  setSiliconflowTextModel: (model: string) => void;
   setTranslationTargetLanguage: (lang: string) => void;
-  setTranslationIframeUrl: (url: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      translationProvider: "iframe",
-      translationApiKey: "",
-      translationTargetLanguage: "EN",
-      translationIframeUrl: "https://translate.google.com/",
-      setTranslationProvider: (provider) => set({ translationProvider: provider }),
-      setTranslationApiKey: (key) => set({ translationApiKey: key }),
+      siliconflowApiKey: "",
+      siliconflowTextModel: DEFAULT_TEXT_MODEL,
+      translationTargetLanguage: "zh-CN",
+      setSiliconflowApiKey: (key) => set({ siliconflowApiKey: key }),
+      setSiliconflowTextModel: (model) => set({ siliconflowTextModel: model }),
       setTranslationTargetLanguage: (lang) => set({ translationTargetLanguage: lang }),
-      setTranslationIframeUrl: (url) => set({ translationIframeUrl: url }),
     }),
     { name: "prompt-studio-settings" },
   ),

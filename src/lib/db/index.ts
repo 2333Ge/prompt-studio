@@ -1,7 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import type {
   Category,
-  GlobalVariableField,
   Prompt,
   PromptResult,
   PromptTag,
@@ -16,7 +15,6 @@ export class PromptStudioDB extends Dexie {
   tags!: Table<Tag, string>;
   promptTags!: Table<PromptTag, string>;
   variableSchemas!: Table<VariableSchema, string>;
-  globalVariableFields!: Table<GlobalVariableField, string>;
   versions!: Table<PromptVersion, string>;
   results!: Table<PromptResult, string>;
 
@@ -42,6 +40,17 @@ export class PromptStudioDB extends Dexie {
       promptTags: "id, promptId, tagId, [promptId+tagId]",
       variableSchemas: "id, name, updatedAt, isTemplate",
       globalVariableFields: "id, key, updatedAt",
+      versions: "id, promptId, createdAt",
+      results: "id, promptId, modelName, createdAt",
+    });
+
+    this.version(3).stores({
+      prompts:
+        "id, title, categoryId, isFavorite, isPrivate, rating, updatedAt, lastUsedAt, schemaId, currentVersionId",
+      categories: "id, name, updatedAt",
+      tags: "id, name",
+      promptTags: "id, promptId, tagId, [promptId+tagId]",
+      variableSchemas: "id, name, updatedAt, isTemplate",
       versions: "id, promptId, createdAt",
       results: "id, promptId, modelName, createdAt",
     });

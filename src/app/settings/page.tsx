@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { importExportRepository } from "@/lib/repositories/dexie-repositories";
+import { getEnvApiKey, resolveTextModel, TEXT_MODELS } from "@/lib/siliconflow/models";
 import { usePrivacyStore, useSettingsStore } from "@/lib/stores";
 import type { ExportBundle, ImportConflictStrategy } from "@/types";
 
@@ -24,15 +25,14 @@ export default function SettingsPage() {
   const disablePrivacyMode = usePrivacyStore((state) => state.disablePrivacyMode);
   const openPasswordDialog = usePrivacyStore((state) => state.openPasswordDialog);
   const {
-    translationProvider,
-    translationApiKey,
-    translationTargetLanguage,
-    translationIframeUrl,
-    setTranslationProvider,
-    setTranslationApiKey,
-    setTranslationTargetLanguage,
-    setTranslationIframeUrl,
+    siliconflowApiKey,
+    siliconflowTextModel,
+    setSiliconflowApiKey,
+    setSiliconflowTextModel,
   } = useSettingsStore();
+  const envApiKey = getEnvApiKey();
+  const displayApiKey = siliconflowApiKey || envApiKey;
+  const keyFromEnv = Boolean(envApiKey) && displayApiKey === envApiKey;
   const [importStrategy, setImportStrategy] = useState<ImportConflictStrategy>("skip");
   const [message, setMessage] = useState("");
 
@@ -150,45 +150,42 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">翻译配置</CardTitle>
-          <CardDescription>翻译结果不会保存到 Prompt 或版本历史。</CardDescription>
+          <CardTitle className="text-base">AI 翻译（硅基流动）</CardTitle>
+          <CardDescription>
+            翻译结果不会保存到 Prompt 或版本历史。目标语言在 Prompt 编辑页的「翻译」面板中配置。
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>Provider</Label>
-            <Select value={translationProvider} onValueChange={(value) => setTranslationProvider(value as typeof translationProvider)}>
+            <Label>硅基流动 API Key</Label>
+            <Input
+              type="password"
+              value={displayApiKey}
+              onChange={(event) => setSiliconflowApiKey(event.target.value)}
+              placeholder="sk-..."
+              readOnly={keyFromEnv}
+            />
+            <p className="text-xs text-muted-foreground">
+              {keyFromEnv
+                ? "已从环境变量 NEXT_PUBLIC_SILICONFLOW_API_KEY 读取"
+                : "Key 仅保存在本地浏览器，不会上传到服务器。"}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>翻译模型</Label>
+            <Select value={resolveTextModel(siliconflowTextModel)} onValueChange={setSiliconflowTextModel}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="iframe">iframe 三方页面</SelectItem>
-                <SelectItem value="deepl">DeepL API</SelectItem>
-                <SelectItem value="google">Google Translate API</SelectItem>
+                {TEXT_MODELS.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.label} — {model.hint}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
-          {translationProvider !== "iframe" && (
-            <>
-              <div className="space-y-2">
-                <Label>API Key</Label>
-                <Input value={translationApiKey} onChange={(event) => setTranslationApiKey(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>目标语言</Label>
-                <Input
-                  value={translationTargetLanguage}
-                  onChange={(event) => setTranslationTargetLanguage(event.target.value)}
-                  placeholder="如 EN / zh-CN"
-                />
-              </div>
-            </>
-          )}
-          {translationProvider === "iframe" && (
-            <div className="space-y-2">
-              <Label>iframe URL</Label>
-              <Input value={translationIframeUrl} onChange={(event) => setTranslationIframeUrl(event.target.value)} />
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>

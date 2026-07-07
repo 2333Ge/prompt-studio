@@ -107,11 +107,7 @@ export function DevTools() {
   ];
 
   return (
-    <div
-      className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end gap-2"
-      onMouseEnter={handleEnter}
-      onMouseLeave={handleLeave}
-    >
+    <div className="pointer-events-none fixed bottom-5 right-5 z-[9999] flex flex-col items-end gap-2">
       {feedback && (
         <div className="rounded-md border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md">
           {feedback}
@@ -121,8 +117,12 @@ export function DevTools() {
       <div
         className={cn(
           "overflow-hidden rounded-lg border border-amber-500/40 bg-popover shadow-lg transition-all duration-200",
-          open ? "pointer-events-auto max-h-96 w-56 opacity-100" : "pointer-events-none max-h-0 w-56 opacity-0",
+          open
+            ? "pointer-events-auto max-h-96 w-56 opacity-100"
+            : "pointer-events-none max-h-0 w-0 border-0 opacity-0",
         )}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
       >
         <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2">
           <p className="text-xs font-medium text-amber-800 dark:text-amber-300">DevTools</p>
@@ -154,7 +154,9 @@ export function DevTools() {
       <button
         type="button"
         aria-label="DevTools"
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/50 bg-amber-500/15 text-amber-700 shadow-md backdrop-blur-sm transition-transform hover:scale-105 dark:text-amber-300"
+        className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-amber-500/50 bg-amber-500/15 text-amber-700 shadow-md backdrop-blur-sm transition-transform hover:scale-105 dark:text-amber-300"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
       >
         <Wrench className="h-4 w-4" />
       </button>

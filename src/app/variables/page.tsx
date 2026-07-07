@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,9 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -25,14 +22,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  globalVariableFieldRepository,
-  promptRepository,
-  schemaRepository,
-} from "@/lib/repositories/dexie-repositories";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { schemaRepository } from "@/lib/repositories/dexie-repositories";
 import { buildVariablePlaceholder } from "@/lib/variables/parser";
+import {
+  findCrossTemplateKeyConflicts,
+  moveGlobalFieldToSchema,
+  saveGlobalFieldDefinition,
+} from "@/lib/variables/global-field-registry";
 import { FIELD_TYPE_OPTIONS } from "@/lib/variables/schema-builder";
 import { VariablePrefixControls } from "@/components/prompt/variable-prefix-controls";
-import type { GlobalVariableField, VariableFieldDefinition, VariableFieldType, VariableSchema } from "@/types";
+import type { VariableFieldDefinition, VariableFieldType, VariableSchema } from "@/types";
 
 const defaultDefinition = (type: VariableFieldType = "text"): VariableFieldDefinition => ({
   type,
@@ -41,278 +47,327 @@ const defaultDefinition = (type: VariableFieldType = "text"): VariableFieldDefin
 });
 
 export default function VariablesPage() {
-  const [globalFields, setGlobalFields] = useState<GlobalVariableField[]>([]);
   const [schemas, setSchemas] = useState<VariableSchema[]>([]);
-  const [schemaCounts, setSchemaCounts] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
-
-  const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
-  const [editingField, setEditingField] = useState<GlobalVariableField | null>(null);
-  const [fieldKey, setFieldKey] = useState("");
-  const [fieldDefinition, setFieldDefinition] = useState<VariableFieldDefinition>(defaultDefinition());
 
   const [schemaDialogOpen, setSchemaDialogOpen] = useState(false);
   const [editingSchema, setEditingSchema] = useState<VariableSchema | null>(null);
   const [schemaName, setSchemaName] = useState("");
-  const [schemaFieldsJson, setSchemaFieldsJson] = useState("{}");
+  const [schemaFields, setSchemaFields] = useState<Record<string, VariableFieldDefinition>>({});
+  const [fieldOwners, setFieldOwners] = useState<Record<string, string>>({});
   const [overwriteDialogOpen, setOverwriteDialogOpen] = useState(false);
   const [pendingSchemaSave, setPendingSchemaSave] = useState<VariableSchema | null>(null);
+  const [keyConflicts, setKeyConflicts] = useState<Array<{ key: string; schemaName: string }>>([]);
 
   const refresh = async () => {
-    const [fields, schemaList] = await Promise.all([
-      globalVariableFieldRepository.getAll(),
-      schemaRepository.getAll(),
-    ]);
-    setGlobalFields(fields);
+    const schemaList = await schemaRepository.getTemplates();
     setSchemas(schemaList);
-
-    const counts: Record<string, number> = {};
-    await Promise.all(
-      schemaList.map(async (schema) => {
-        counts[schema.id] = await promptRepository.countBySchemaId(schema.id);
-      }),
-    );
-    setSchemaCounts(counts);
   };
 
   useEffect(() => {
     void refresh();
   }, []);
 
-  const filteredFields = useMemo(() => {
+  const filteredSchemas = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return globalFields;
-    return globalFields.filter(
-      (field) =>
-        field.key.toLowerCase().includes(keyword) ||
-        field.definition.title?.toLowerCase().includes(keyword) ||
-        field.tags.some((tag) => tag.toLowerCase().includes(keyword)),
-    );
-  }, [globalFields, search]);
-
-  const openCreateField = () => {
-    setEditingField(null);
-    setFieldKey("");
-    setFieldDefinition(defaultDefinition());
-    setFieldDialogOpen(true);
-  };
-
-  const openEditField = (field: GlobalVariableField) => {
-    setEditingField(field);
-    setFieldKey(field.key);
-    setFieldDefinition({ ...field.definition });
-    setFieldDialogOpen(true);
-  };
-
-  const saveField = async () => {
-    if (!fieldKey.trim()) return;
-    const definition = {
-      ...fieldDefinition,
-      title: fieldDefinition.title || fieldKey.trim(),
-    } as VariableFieldDefinition;
-
-    if (editingField) {
-      await globalVariableFieldRepository.update(editingField.id, {
-        key: fieldKey.trim(),
-        definition,
-      });
-    } else {
-      await globalVariableFieldRepository.create({
-        key: fieldKey.trim(),
-        definition,
-      });
-    }
-    setFieldDialogOpen(false);
-    await refresh();
-  };
+    if (!keyword) return schemas;
+    return schemas.filter((schema) => {
+      if (schema.name.toLowerCase().includes(keyword)) return true;
+      return Object.entries(schema.fields).some(
+        ([key, definition]) =>
+          key.toLowerCase().includes(keyword) ||
+          definition.title?.toLowerCase().includes(keyword) ||
+          definition.hint?.toLowerCase().includes(keyword),
+      );
+    });
+  }, [schemas, search]);
 
   const openCreateSchema = () => {
     setEditingSchema(null);
     setSchemaName("");
-    setSchemaFieldsJson("{}");
+    setSchemaFields({});
+    setFieldOwners({});
     setSchemaDialogOpen(true);
   };
 
   const openEditSchema = (schema: VariableSchema) => {
     setEditingSchema(schema);
     setSchemaName(schema.name);
-    setSchemaFieldsJson(JSON.stringify(schema.fields, null, 2));
+    setSchemaFields(structuredClone(schema.fields));
+    const owners: Record<string, string> = {};
+    for (const key of Object.keys(schema.fields)) {
+      owners[key] = schema.id;
+    }
+    setFieldOwners(owners);
     setSchemaDialogOpen(true);
   };
 
+  const handleMoveField = async (key: string, fromSchemaId: string, targetSchemaId: string) => {
+    if (fromSchemaId === targetSchemaId) return;
+    await moveGlobalFieldToSchema(key, targetSchemaId);
+    await refresh();
+  };
+
   const persistSchema = async (saveAsCopy = false) => {
-    let fields: Record<string, VariableFieldDefinition>;
-    try {
-      fields = JSON.parse(schemaFieldsJson) as Record<string, VariableFieldDefinition>;
-    } catch {
-      alert("Schema JSON 格式无效");
-      return;
+    const fieldsForCurrentSchema: Record<string, VariableFieldDefinition> = {};
+    const fieldsToMove: Array<{ key: string; definition: VariableFieldDefinition; targetSchemaId: string }> = [];
+
+    for (const [key, definition] of Object.entries(schemaFields)) {
+      const ownerId = fieldOwners[key] ?? editingSchema?.id;
+      if (!editingSchema || ownerId === editingSchema.id) {
+        fieldsForCurrentSchema[key] = definition;
+      } else {
+        fieldsToMove.push({ key, definition, targetSchemaId: ownerId });
+      }
     }
 
     if (saveAsCopy && editingSchema) {
       const cloned = await schemaRepository.clone(editingSchema.id, `${schemaName} (副本)`);
-      await schemaRepository.update(cloned.id, { fields, isTemplate: true });
+      await schemaRepository.update(cloned.id, { fields: fieldsForCurrentSchema, isTemplate: true });
     } else if (editingSchema) {
-      await schemaRepository.update(editingSchema.id, { name: schemaName, fields, isTemplate: true });
+      await schemaRepository.update(editingSchema.id, {
+        name: schemaName,
+        fields: fieldsForCurrentSchema,
+        isTemplate: true,
+      });
     } else {
-      await schemaRepository.create({ name: schemaName, fields, isTemplate: true });
+      await schemaRepository.create({ name: schemaName, fields: fieldsForCurrentSchema, isTemplate: true });
+    }
+
+    for (const { key, definition, targetSchemaId } of fieldsToMove) {
+      await saveGlobalFieldDefinition(key, definition, { targetSchemaId });
     }
 
     setSchemaDialogOpen(false);
     setOverwriteDialogOpen(false);
     setPendingSchemaSave(null);
+    setKeyConflicts([]);
     await refresh();
+  };
+
+  const persistSchemaWithConflictResolution = async () => {
+    for (const conflict of keyConflicts) {
+      const owner = await schemaRepository.findTemplateByFieldKey(conflict.key);
+      if (!owner || owner.schema.id === editingSchema?.id) continue;
+      const nextFields = { ...owner.schema.fields };
+      delete nextFields[conflict.key];
+      await schemaRepository.update(owner.schema.id, { fields: nextFields, isTemplate: true });
+    }
+    await persistSchema(false);
   };
 
   const saveSchema = async () => {
     if (!schemaName.trim()) return;
 
-    if (editingSchema) {
-      const count = schemaCounts[editingSchema.id] ?? 0;
-      if (count > 1) {
-        setPendingSchemaSave(editingSchema);
-        setOverwriteDialogOpen(true);
-        return;
+    const fieldsForCurrentSchema: Record<string, VariableFieldDefinition> = {};
+    for (const [key, definition] of Object.entries(schemaFields)) {
+      const ownerId = fieldOwners[key] ?? editingSchema?.id;
+      if (!editingSchema || ownerId === editingSchema.id) {
+        fieldsForCurrentSchema[key] = definition;
       }
     }
 
+    const conflicts = await findCrossTemplateKeyConflicts(fieldsForCurrentSchema, editingSchema?.id);
+    if (conflicts.length > 0) {
+      setKeyConflicts(conflicts);
+      setPendingSchemaSave(editingSchema);
+      setOverwriteDialogOpen(true);
+      return;
+    }
+
+    if (editingSchema) {
+      setKeyConflicts([]);
+      setPendingSchemaSave(editingSchema);
+      setOverwriteDialogOpen(true);
+      return;
+    }
+
     await persistSchema(false);
+  };
+
+  const addSchemaField = () => {
+    const baseKey = "field";
+    let index = Object.keys(schemaFields).length + 1;
+    let key = `${baseKey}${index}`;
+    while (key in schemaFields) {
+      index += 1;
+      key = `${baseKey}${index}`;
+    }
+    setSchemaFields((current) => ({
+      ...current,
+      [key]: defaultDefinition(),
+    }));
+    if (editingSchema) {
+      setFieldOwners((current) => ({ ...current, [key]: editingSchema.id }));
+    }
+  };
+
+  const updateSchemaFieldKey = (oldKey: string, newKey: string) => {
+    const trimmed = newKey.trim();
+    if (!trimmed || trimmed === oldKey || trimmed in schemaFields) return;
+    setSchemaFields((current) => {
+      const next = { ...current };
+      next[trimmed] = next[oldKey];
+      delete next[oldKey];
+      return next;
+    });
+    setFieldOwners((current) => {
+      if (!(oldKey in current)) return current;
+      const next = { ...current };
+      next[trimmed] = next[oldKey];
+      delete next[oldKey];
+      return next;
+    });
+  };
+
+  const updateSchemaFieldDefinition = (key: string, patch: Partial<VariableFieldDefinition>) => {
+    setSchemaFields((current) => ({
+      ...current,
+      [key]: { ...current[key], ...patch },
+    }));
+  };
+
+  const removeSchemaField = (key: string) => {
+    setSchemaFields((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setFieldOwners((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const updateFieldOwner = (key: string, schemaId: string) => {
+    setFieldOwners((current) => ({ ...current, [key]: schemaId }));
   };
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold">变量管理</h1>
-        <p className="text-sm text-muted-foreground">集中管理全局字段库与 Schema 模板</p>
+        <p className="text-sm text-muted-foreground">集中管理全局 Schema 模板</p>
       </div>
 
-      <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索字段或模板..." />
+      <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Schema 或字段..." />
 
-      <Tabs defaultValue="fields">
-        <TabsList>
-          <TabsTrigger value="fields">全局字段库</TabsTrigger>
-          <TabsTrigger value="schemas">Schema 模板</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="fields" className="mt-4 space-y-4">
-          <Button onClick={openCreateField}>
-            <Plus className="h-4 w-4" />
-            新建字段
-          </Button>
-          <div className="grid gap-3">
-            {filteredFields.map((field) => (
-              <Card key={field.id}>
-                <CardContent className="flex items-start justify-between gap-3 p-4">
-                  <div className="space-y-1">
-                    <p className="font-medium">{field.definition.title ?? field.key}</p>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {buildVariablePlaceholder(field.key)}
-                      {field.definition.prefixEnabled && field.definition.prefix
-                        ? ` · 前缀 ${field.definition.prefix.trim()}`
-                        : ""}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      类型: {field.definition.type}
-                      {field.definition.hint ? ` · ${field.definition.hint}` : ""}
-                    </p>
+      <div className="space-y-4">
+        <Button onClick={openCreateSchema}>
+          <Plus className="h-4 w-4" />
+          新建 Schema 模板
+        </Button>
+        <div className="grid gap-3">
+          {filteredSchemas.map((schema) => (
+            <Card key={schema.id}>
+              <CardContent className="flex items-start justify-between gap-3 p-4">
+                <div className="space-y-1">
+                  <p className="font-medium">{schema.name}</p>
+                  <p className="text-xs text-muted-foreground">{Object.keys(schema.fields).length} 个字段</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {Object.entries(schema.fields).map(([key, definition]) => (
+                      <FieldTag
+                        key={key}
+                        fieldKey={key}
+                        definition={definition}
+                        currentSchemaId={schema.id}
+                        schemas={schemas}
+                        onMove={(targetSchemaId) =>
+                          void handleMoveField(key, schema.id, targetSchemaId)
+                        }
+                      />
+                    ))}
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => openEditField(field)}>
-                      编辑
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => void globalVariableFieldRepository.delete(field.id).then(refresh)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-            {filteredFields.length === 0 && (
-              <p className="text-sm text-muted-foreground">暂无全局字段</p>
-            )}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="schemas" className="mt-4 space-y-4">
-          <Button onClick={openCreateSchema}>
-            <Plus className="h-4 w-4" />
-            新建 Schema 模板
-          </Button>
-          <div className="grid gap-3">
-            {schemas
-              .filter((schema) => schema.isTemplate || Object.keys(schema.fields).length > 0)
-              .map((schema) => (
-                <Card key={schema.id}>
-                  <CardContent className="flex items-start justify-between gap-3 p-4">
-                    <div className="space-y-1">
-                      <p className="font-medium">{schema.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {Object.keys(schema.fields).length} 个字段 · 被 {schemaCounts[schema.id] ?? 0} 个 Prompt 引用
-                        {schema.isTemplate ? " · 模板" : ""}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEditSchema(schema)}>
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => void schemaRepository.delete(schema.id).then(refresh)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>{editingField ? "编辑字段" : "新建字段"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label>变量 key</Label>
-              <Input value={fieldKey} onChange={(event) => setFieldKey(event.target.value)} placeholder="ar" />
-            </div>
-            <FieldDefinitionEditor definition={fieldDefinition} onChange={setFieldDefinition} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setFieldDialogOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => void saveField()}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => openEditSchema(schema)}>
+                    编辑
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => void schemaRepository.delete(schema.id).then(refresh)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {filteredSchemas.length === 0 && (
+            <p className="text-sm text-muted-foreground">暂无 Schema 模板</p>
+          )}
+        </div>
+      </div>
 
       <Dialog open={schemaDialogOpen} onOpenChange={setSchemaDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-auto">
           <DialogHeader>
             <DialogTitle>{editingSchema ? "编辑 Schema 模板" : "新建 Schema 模板"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label>名称</Label>
               <Input value={schemaName} onChange={(event) => setSchemaName(event.target.value)} />
             </div>
-            <div className="space-y-2">
-              <Label>字段 JSON</Label>
-              <Textarea
-                value={schemaFieldsJson}
-                onChange={(event) => setSchemaFieldsJson(event.target.value)}
-                rows={12}
-                className="font-mono text-xs"
-              />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>字段</Label>
+                <Button type="button" variant="outline" size="sm" onClick={addSchemaField}>
+                  <Plus className="h-4 w-4" />
+                  添加字段
+                </Button>
+              </div>
+
+              {Object.keys(schemaFields).length === 0 && (
+                <p className="text-sm text-muted-foreground">暂无字段，点击「添加字段」开始配置。</p>
+              )}
+
+              {Object.entries(schemaFields).map(([key, definition]) => (
+                <Card key={key}>
+                  <CardContent className="space-y-3 p-4">
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-2">
+                        <Label>变量 key</Label>
+                        <Input
+                          defaultValue={key}
+                          onBlur={(event) => updateSchemaFieldKey(key, event.target.value)}
+                        />
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => removeSchemaField(key)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {editingSchema && schemas.length > 1 && (
+                      <div className="space-y-2">
+                        <Label>所属分组</Label>
+                        <Select
+                          value={fieldOwners[key] ?? editingSchema.id}
+                          onValueChange={(value) => updateFieldOwner(key, value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {schemas.map((template) => (
+                              <SelectItem key={template.id} value={template.id}>
+                                {template.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <FieldDefinitionEditor
+                      definition={definition}
+                      onChange={(next) => updateSchemaFieldDefinition(key, next)}
+                    />
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
           <DialogFooter>
@@ -327,24 +382,87 @@ export default function VariablesPage() {
       <Dialog open={overwriteDialogOpen} onOpenChange={setOverwriteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认覆盖 Schema</DialogTitle>
+            <DialogTitle>{keyConflicts.length > 0 ? "全局变量 key 冲突" : "确认覆盖 Schema"}</DialogTitle>
             <DialogDescription>
-              模板「{pendingSchemaSave?.name}」被 {pendingSchemaSave ? schemaCounts[pendingSchemaSave.id] : 0}{" "}
-              个 Prompt 引用，保存将覆盖它们的表单配置。
+              {keyConflicts.length > 0 ? (
+                <>
+                  以下变量 key 已在其他 Schema 中定义，全局唯一，保存将从原 Schema 中移除并写入当前模板：
+                  <ul className="mt-2 list-inside list-disc">
+                    {keyConflicts.map((conflict) => (
+                      <li key={conflict.key}>
+                        <span className="font-mono">{conflict.key}</span> → 「{conflict.schemaName}」
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <>模板「{pendingSchemaSave?.name}」保存将覆盖使用该模板的 Prompt 表单配置。</>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setOverwriteDialogOpen(false)}>
               取消
             </Button>
-            <Button variant="secondary" onClick={() => void persistSchema(true)}>
-              另存为副本
-            </Button>
-            <Button onClick={() => void persistSchema(false)}>覆盖保存</Button>
+            {keyConflicts.length === 0 && (
+              <Button variant="secondary" onClick={() => void persistSchema(true)}>
+                另存为副本
+              </Button>
+            )}
+            <Button onClick={() => void persistSchemaWithConflictResolution()}>覆盖保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function FieldTag({
+  fieldKey,
+  definition,
+  currentSchemaId,
+  schemas,
+  onMove,
+}: {
+  fieldKey: string;
+  definition: VariableFieldDefinition;
+  currentSchemaId: string;
+  schemas: VariableSchema[];
+  onMove: (targetSchemaId: string) => void;
+}) {
+  const otherSchemas = schemas.filter((schema) => schema.id !== currentSchemaId);
+  const label = `${buildVariablePlaceholder(fieldKey)}${
+    definition.default != null && definition.default !== "" ? ` = ${definition.default}` : ""
+  }`;
+
+  if (otherSchemas.length === 0) {
+    return (
+      <span className="rounded-md border px-2 py-0.5 font-mono text-xs text-muted-foreground">{label}</span>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="点击移动到其他分组"
+        >
+          {label}
+          <ArrowRightLeft className="h-3 w-3 shrink-0 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuLabel>移动到分组</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {otherSchemas.map((schema) => (
+          <DropdownMenuItem key={schema.id} onClick={() => onMove(schema.id)}>
+            {schema.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -384,14 +502,6 @@ function FieldDefinitionEditor({
       </div>
 
       <VariablePrefixControls field={definition} onChange={(patch) => onChange({ ...definition, ...patch })} />
-
-      <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-        <Label>默认值相同时省略</Label>
-        <Switch
-          checked={Boolean(definition.omitIfDefault)}
-          onCheckedChange={(checked) => onChange({ ...definition, omitIfDefault: checked })}
-        />
-      </div>
 
       {definition.type === "select" && (
         <div className="space-y-2">

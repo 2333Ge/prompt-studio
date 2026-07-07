@@ -160,9 +160,13 @@ export default function PromptsPage() {
             <Label>排序</Label>
             <Select
               value={query.sortBy ?? "updatedAt"}
-              onValueChange={(value) =>
-                setQuery({ sortBy: value as "updatedAt" | "lastUsedAt" | "rating" | "title" })
-              }
+              onValueChange={(value) => {
+                const sortBy = value as "updatedAt" | "lastUsedAt" | "rating" | "title";
+                setQuery({
+                  sortBy,
+                  sortOrder: sortBy === "title" ? "asc" : "desc",
+                });
+              }}
             >
               <SelectTrigger>
                 <SelectValue />

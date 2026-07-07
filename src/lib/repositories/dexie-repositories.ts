@@ -5,7 +5,6 @@ import { getDb } from "@/lib/db";
 import type {
   Category,
   ExportBundle,
-  GlobalVariableField,
   ImportConflictStrategy,
   Prompt,
   PromptQueryOptions,
@@ -13,11 +12,12 @@ import type {
   PromptVersion,
   PromptWithRelations,
   Tag,
+  VariableFieldDefinition,
   VariableSchema,
 } from "@/types";
+import { findGlobalField } from "@/lib/variables/global-field-registry";
 import type {
   CategoryRepository,
-  GlobalVariableFieldRepository,
   ImportExportRepository,
   PromptRepository,
   ResultRepository,
@@ -57,15 +57,16 @@ function matchesSearch(prompt: PromptWithRelations, search: string): boolean {
   );
 }
 
+function compareTitles(left: string, right: string, sortOrder: "asc" | "desc"): number {
+  const result = left.localeCompare(right, "zh-CN", { numeric: true, sensitivity: "base" });
+  return sortOrder === "asc" ? result : -result;
+}
+
 function sortPrompts(prompts: PromptWithRelations[], options?: PromptQueryOptions): PromptWithRelations[] {
   const sortBy = options?.sortBy ?? "updatedAt";
   const sortOrder = options?.sortOrder ?? "desc";
 
   return [...prompts].sort((a, b) => {
-    if (a.isFavorite !== b.isFavorite) {
-      return a.isFavorite ? -1 : 1;
-    }
-
     const left = a[sortBy];
     const right = b[sortBy];
 
@@ -74,7 +75,7 @@ function sortPrompts(prompts: PromptWithRelations[], options?: PromptQueryOption
     if (right == null) return -1;
 
     if (typeof left === "string" && typeof right === "string") {
-      return sortOrder === "asc" ? left.localeCompare(right) : right.localeCompare(left);
+      return compareTitles(left, right, sortOrder);
     }
 
     if (typeof left === "number" && typeof right === "number") {
@@ -213,10 +214,6 @@ export class DexiePromptRepository implements PromptRepository {
     return (await this.getById(duplicate.id, true))!;
   }
 
-  async countBySchemaId(schemaId: string): Promise<number> {
-    return getDb().prompts.where("schemaId").equals(schemaId).count();
-  }
-
   async setTags(promptId: string, tagIds: string[]): Promise<void> {
     const db = getDb();
     await db.transaction("rw", db.promptTags, async () => {
@@ -268,6 +265,15 @@ export class DexieCategoryRepository implements CategoryRepository {
       await Promise.all(prompts.map((prompt) => db.prompts.put({ ...prompt, categoryId: null })));
       await db.categories.delete(id);
     });
+  }
+
+  async findOrCreate(name: string): Promise<Category> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("Category name required");
+    const existing = await getDb().categories.toArray();
+    const found = existing.find((category) => category.name.toLowerCase() === trimmed.toLowerCase());
+    if (found) return found;
+    return this.create(trimmed);
   }
 }
 
@@ -381,6 +387,12 @@ export class DexieSchemaRepository implements SchemaRepository {
     return all.filter((schema) => schema.isTemplate);
   }
 
+  async findTemplateByFieldKey(
+    key: string,
+  ): Promise<{ schema: VariableSchema; definition: VariableFieldDefinition } | null> {
+    return findGlobalField(key);
+  }
+
   async create(
     input: Pick<VariableSchema, "name" | "fields"> & Partial<Pick<VariableSchema, "isTemplate">>,
   ): Promise<VariableSchema> {
@@ -423,52 +435,6 @@ export class DexieSchemaRepository implements SchemaRepository {
   }
 }
 
-export class DexieGlobalVariableFieldRepository implements GlobalVariableFieldRepository {
-  async getAll(): Promise<GlobalVariableField[]> {
-    return getDb().globalVariableFields.orderBy("updatedAt").reverse().toArray();
-  }
-
-  async getById(id: string): Promise<GlobalVariableField | null> {
-    return (await getDb().globalVariableFields.get(id)) ?? null;
-  }
-
-  async getByKey(key: string): Promise<GlobalVariableField | null> {
-    const all = await this.getAll();
-    return all.find((item) => item.key.toLowerCase() === key.toLowerCase()) ?? null;
-  }
-
-  async create(
-    input: Pick<GlobalVariableField, "key" | "definition"> & Partial<Pick<GlobalVariableField, "tags">>,
-  ): Promise<GlobalVariableField> {
-    const timestamp = now();
-    const field: GlobalVariableField = {
-      id: generateId(),
-      key: input.key,
-      definition: input.definition,
-      tags: input.tags ?? [],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    await getDb().globalVariableFields.add(field);
-    return field;
-  }
-
-  async update(
-    id: string,
-    input: Partial<Pick<GlobalVariableField, "key" | "definition" | "tags">>,
-  ): Promise<GlobalVariableField> {
-    const existing = await getDb().globalVariableFields.get(id);
-    if (!existing) throw new Error("Global variable field not found");
-    const updated = { ...existing, ...input, updatedAt: now() };
-    await getDb().globalVariableFields.put(updated);
-    return updated;
-  }
-
-  async delete(id: string): Promise<void> {
-    await getDb().globalVariableFields.delete(id);
-  }
-}
-
 export class DexieImportExportRepository implements ImportExportRepository {
   async exportAll(includePrivate: boolean): Promise<ExportBundle> {
     const db = getDb();
@@ -488,12 +454,11 @@ export class DexieImportExportRepository implements ImportExportRepository {
     const prompts = allPrompts.filter(Boolean).filter((prompt) => includePrivate || !prompt!.isPrivate) as Prompt[];
 
     const promptIdSet = new Set(prompts.map((prompt) => prompt.id));
-    const [categories, tags, promptTags, variableSchemas, globalVariableFields, versions, results] = await Promise.all([
+    const [categories, tags, promptTags, variableSchemas, versions, results] = await Promise.all([
       db.categories.toArray(),
       db.tags.toArray(),
       db.promptTags.toArray(),
       db.variableSchemas.toArray(),
-      db.globalVariableFields.toArray(),
       db.versions.toArray(),
       db.results.toArray(),
     ]);
@@ -506,7 +471,6 @@ export class DexieImportExportRepository implements ImportExportRepository {
       tags,
       promptTags: promptTags.filter((item) => promptIdSet.has(item.promptId)),
       variableSchemas,
-      globalVariableFields,
       versions: versions.filter((item) => promptIdSet.has(item.promptId)),
       results: results.filter((item) => promptIdSet.has(item.promptId)),
     };
@@ -519,7 +483,7 @@ export class DexieImportExportRepository implements ImportExportRepository {
 
     await db.transaction(
       "rw",
-      [db.prompts, db.categories, db.tags, db.promptTags, db.variableSchemas, db.globalVariableFields, db.versions, db.results],
+      [db.prompts, db.categories, db.tags, db.promptTags, db.variableSchemas, db.versions, db.results],
       async () => {
         const upsert = async <T extends { id: string }>(table: Table<T, string>, item: T) => {
           const existing = await table.get(item.id);
@@ -544,9 +508,6 @@ export class DexieImportExportRepository implements ImportExportRepository {
           await upsert(db.tags, { ...tag, name: flattenTagName(tag.name) });
         }
         for (const schema of bundle.variableSchemas) await upsert(db.variableSchemas, schema);
-        if (bundle.globalVariableFields) {
-          for (const field of bundle.globalVariableFields) await upsert(db.globalVariableFields, field);
-        }
         for (const prompt of bundle.prompts) await upsert(db.prompts, prompt);
         for (const promptTag of bundle.promptTags) await upsert(db.promptTags, promptTag);
         for (const version of bundle.versions) await upsert(db.versions, version);
@@ -564,5 +525,4 @@ export const tagRepository = new DexieTagRepository();
 export const versionRepository = new DexieVersionRepository();
 export const resultRepository = new DexieResultRepository();
 export const schemaRepository = new DexieSchemaRepository();
-export const globalVariableFieldRepository = new DexieGlobalVariableFieldRepository();
 export const importExportRepository = new DexieImportExportRepository();

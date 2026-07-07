@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { promptRepository } from "@/lib/repositories/dexie-repositories";
 import { usePrivacyStore, useUIStore } from "@/lib/stores";
 import type { PromptWithRelations } from "@/types";
@@ -35,23 +35,34 @@ export function usePrompt(id: string | null) {
   const privacyModeEnabled = usePrivacyStore((state) => state.privacyModeEnabled);
   const [prompt, setPrompt] = useState<PromptWithRelations | null>(null);
   const [loading, setLoading] = useState(Boolean(id));
+  const hasLoadedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!id) {
       setPrompt(null);
       setLoading(false);
+      hasLoadedRef.current = false;
       return;
     }
-    setLoading(true);
+
+    const isInitialLoad = !hasLoadedRef.current;
+    if (isInitialLoad) {
+      setLoading(true);
+    }
+
     try {
       const data = await promptRepository.getById(id, privacyModeEnabled);
       setPrompt(data);
+      hasLoadedRef.current = true;
     } finally {
-      setLoading(false);
+      if (isInitialLoad) {
+        setLoading(false);
+      }
     }
   }, [id, privacyModeEnabled]);
 
   useEffect(() => {
+    hasLoadedRef.current = false;
     void refresh();
   }, [refresh]);
 

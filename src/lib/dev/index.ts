@@ -7,7 +7,7 @@ export async function clearAllData(): Promise<void> {
   const db = getDb();
   await db.transaction(
     "rw",
-    [db.prompts, db.categories, db.tags, db.promptTags, db.variableSchemas, db.globalVariableFields, db.versions, db.results],
+    [db.prompts, db.categories, db.tags, db.promptTags, db.variableSchemas, db.versions, db.results],
     async () => {
       await Promise.all([
         db.prompts.clear(),
@@ -15,7 +15,6 @@ export async function clearAllData(): Promise<void> {
         db.tags.clear(),
         db.promptTags.clear(),
         db.variableSchemas.clear(),
-        db.globalVariableFields.clear(),
         db.versions.clear(),
         db.results.clear(),
       ]);

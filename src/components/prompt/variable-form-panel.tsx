@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,54 +14,40 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mediaStorageAdapter } from "@/lib/storage/media-adapter";
 import { useUIStore } from "@/lib/stores";
-import { VariablePrefixControls } from "@/components/prompt/variable-prefix-controls";
 import type { PromptWithRelations, VariableFieldDefinition } from "@/types";
 
 interface VariableFormPanelProps {
   prompt: PromptWithRelations;
   variableKey: string;
   fields: Record<string, VariableFieldDefinition>;
-  onUpdateField: (name: string, patch: Partial<VariableFieldDefinition>) => void;
 }
 
 export function VariableFormPanel({
   prompt,
   variableKey,
   fields,
-  onUpdateField,
 }: VariableFormPanelProps) {
   const variableValues = useUIStore((state) => state.variableValues);
   const setVariableValues = useUIStore((state) => state.setVariableValues);
-  const initializedFor = useRef<string | null>(null);
 
+  // 仅补全缺失变量的 default，不覆盖已有输入（切换 tab 会 remount，不能整表重置）
   useEffect(() => {
-    const initKey = `${prompt.id}:${prompt.schema?.id ?? "none"}`;
     const variableNames = variableKey ? variableKey.split("\0") : [];
-
-    if (initializedFor.current !== initKey) {
-      initializedFor.current = initKey;
-      const initial: Record<string, unknown> = {};
-      for (const name of variableNames) {
-        const field = fields[name] ?? prompt.schema?.fields[name];
-        initial[name] = field?.default ?? "";
-      }
-      setVariableValues(initial);
-      return;
-    }
+    if (variableNames.length === 0) return;
 
     setVariableValues((current) => {
       let changed = false;
       const next = { ...current };
       for (const name of variableNames) {
-        if (!(name in next)) {
-          const field = fields[name] ?? prompt.schema?.fields[name];
-          next[name] = field?.default ?? "";
-          changed = true;
-        }
+        if (name in next) continue;
+        const field = fields[name] ?? prompt.schema?.fields[name];
+        if (!field) continue;
+        next[name] = field.default ?? "";
+        changed = true;
       }
       return changed ? next : current;
     });
-  }, [fields, prompt.id, prompt.schema, prompt.schema?.id, setVariableValues, variableKey]);
+  }, [fields, prompt.schema, setVariableValues, variableKey]);
 
   const variableNames = variableKey ? variableKey.split("\0") : [];
 
@@ -88,7 +74,6 @@ export function VariableFormPanel({
               field={field}
               value={variableValues[name]}
               onChange={(value) => updateValue(name, value)}
-              onFieldChange={(patch) => onUpdateField(name, patch)}
             />
           );
         })}
@@ -97,21 +82,25 @@ export function VariableFormPanel({
   );
 }
 
+function hasSchemaPrefix(field: VariableFieldDefinition): boolean {
+  return Boolean(field.prefixEnabled && field.prefix);
+}
+
 function VariableField({
   name,
   field,
   value,
   onChange,
-  onFieldChange,
 }: {
   name: string;
   field: VariableFieldDefinition;
   value: unknown;
   onChange: (value: unknown) => void;
-  onFieldChange: (patch: Partial<VariableFieldDefinition>) => void;
 }) {
   const label = field.title ?? name;
   const hint = field.hint ?? field.description;
+  const showPrefix = hasSchemaPrefix(field);
+  const compactClass = showPrefix ? "h-8" : undefined;
 
   const valueControl = (() => {
     switch (field.type) {
@@ -122,7 +111,7 @@ function VariableField({
       case "select":
         return (
           <Select value={String(value ?? "")} onValueChange={onChange}>
-            <SelectTrigger>
+            <SelectTrigger className={compactClass}>
               <SelectValue placeholder="请选择" />
             </SelectTrigger>
             <SelectContent>
@@ -140,13 +129,19 @@ function VariableField({
             type="number"
             min={field.min}
             max={field.max}
+            className={compactClass}
             value={value == null ? "" : String(value)}
             onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
           />
         );
       case "date":
         return (
-          <Input type="date" value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />
+          <Input
+            type="date"
+            className={compactClass}
+            value={String(value ?? "")}
+            onChange={(event) => onChange(event.target.value)}
+          />
         );
       case "image":
         return (
@@ -169,16 +164,34 @@ function VariableField({
           </>
         );
       default:
-        return <Input value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
+        return (
+          <Input
+            className={compactClass}
+            value={String(value ?? "")}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        );
     }
   })();
+
+  const wrappedControl =
+    showPrefix && field.type !== "textarea" && field.type !== "image" ? (
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 font-mono text-sm text-muted-foreground">{field.prefix!.trimEnd()}</span>
+        <div className="min-w-0 flex-1">{valueControl}</div>
+      </div>
+    ) : (
+      valueControl
+    );
 
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      {valueControl}
-      <VariablePrefixControls field={field} onChange={onFieldChange} compact />
+      {showPrefix && (field.type === "textarea" || field.type === "image") && (
+        <span className="font-mono text-xs text-muted-foreground">{field.prefix!.trimEnd()}</span>
+      )}
+      {wrappedControl}
     </div>
   );
 }

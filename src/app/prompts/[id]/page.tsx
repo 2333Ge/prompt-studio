@@ -1,10 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Copy, CopyPlus, Eye, History, Lock, Save, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PanelResizer } from "@/components/ui/panel-resizer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,11 +20,14 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePrompt } from "@/hooks/use-prompts";
+import { useResizableSidebar } from "@/hooks/use-resizable-sidebar";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import {
   categoryRepository,
   promptRepository,
@@ -32,8 +36,8 @@ import {
 } from "@/lib/repositories/dexie-repositories";
 import { usePrivacyStore, useUIStore } from "@/lib/stores";
 import { cn, copyToClipboard } from "@/lib/utils";
-import { fillTemplate, parseVariables, createDefaultField } from "@/lib/variables/parser";
-import { syncSchemaFromContent } from "@/lib/variables/sync-schema";
+import { fillTemplate, parseVariables, buildVariablePlaceholder } from "@/lib/variables/parser";
+import { resolveFieldsForKeys } from "@/lib/variables/global-field-registry";
 import type { Category, Tag, VariableFieldDefinition } from "@/types";
 import { VariableFormPanel } from "@/components/prompt/variable-form-panel";
 import { SchemaEditorPanel } from "@/components/prompt/schema-editor-panel";
@@ -41,6 +45,7 @@ import { VersionPanel } from "@/components/prompt/version-panel";
 import { ResultPanel } from "@/components/prompt/result-panel";
 import { TranslationPanel } from "@/components/prompt/translation-panel";
 import { TagMultiSelect } from "@/components/prompt/tag-multi-select";
+import { CategorySelect } from "@/components/prompt/category-select";
 import { EditorInsertToolbar } from "@/components/prompt/editor-insert-toolbar";
 import { InsertVariablePicker } from "@/components/prompt/insert-variable-picker";
 import { InsertPromptDialog } from "@/components/prompt/insert-prompt-dialog";
@@ -57,6 +62,7 @@ export default function PromptEditorPage() {
   const setEditorPanelTab = useUIStore((state) => state.setEditorPanelTab);
   const variableValues = useUIStore((state) => state.variableValues);
   const setVariableValues = useUIStore((state) => state.setVariableValues);
+  const mergeVariableValues = useUIStore((state) => state.mergeVariableValues);
 
   const [localTitle, setLocalTitle] = useState("");
   const [localContent, setLocalContent] = useState("");
@@ -71,6 +77,7 @@ export default function PromptEditorPage() {
   const [isFavorite, setIsFavorite] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState<string | null>(null);
   const [versionNote, setVersionNote] = useState("");
   const [versionDialogOpen, setVersionDialogOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -78,8 +85,10 @@ export default function PromptEditorPage() {
   const [insertPromptOpen, setInsertPromptOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [draftFields, setDraftFields] = useState<Record<string, VariableFieldDefinition>>({});
+  const [baselineFields, setBaselineFields] = useState<Record<string, VariableFieldDefinition>>({});
   const initializedPromptId = useRef<string | null>(null);
   const loadedFieldsKey = useRef<string | null>(null);
+  const prevParsedVariablesRef = useRef<string[]>([]);
   const editorHandleRef = useRef<MonacoEditorHandle | null>(null);
 
   useEffect(() => {
@@ -99,6 +108,7 @@ export default function PromptEditorPage() {
       setLocalNotes(prompt.notes);
       setEditorKey((key) => key + 1);
       setVariableValues({});
+      prevParsedVariablesRef.current = [];
       initializedPromptId.current = prompt.id;
       setSelectedTagIds(prompt.tags.map((tag) => tag.id));
       setNewTagNames([]);
@@ -106,16 +116,21 @@ export default function PromptEditorPage() {
       setIsFavorite(prompt.isFavorite);
       setIsPrivate(prompt.isPrivate);
       setCategoryId(prompt.categoryId);
+      setNewCategoryName(null);
+      loadedFieldsKey.current = null;
     }
   }, [prompt, setVariableValues]);
 
   useEffect(() => {
     if (!prompt) return;
-    const fieldsKey = `${prompt.id}:${prompt.schema?.id ?? "none"}`;
-    if (loadedFieldsKey.current !== fieldsKey) {
-      setDraftFields(prompt.schema?.fields ?? {});
-      loadedFieldsKey.current = fieldsKey;
-    }
+    if (loadedFieldsKey.current === prompt.id) return;
+
+    const keys = parseVariables(prompt.content);
+    void resolveFieldsForKeys(keys).then((fields) => {
+      setBaselineFields(fields);
+      setDraftFields(fields);
+      loadedFieldsKey.current = prompt.id;
+    });
   }, [prompt]);
 
   const parsedVariables = useMemo(() => parseVariables(localContent), [localContent]);
@@ -123,30 +138,92 @@ export default function PromptEditorPage() {
 
   useEffect(() => {
     if (parsedVariables.length === 0) return;
-    setDraftFields((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const name of parsedVariables) {
-        if (!(name in next)) {
-          next[name] = prompt?.schema?.fields[name] ?? createDefaultField(name);
-          changed = true;
+
+    let cancelled = false;
+    void (async () => {
+      const resolved = await resolveFieldsForKeys(parsedVariables);
+      if (cancelled) return;
+      setDraftFields((current) => {
+        const next = { ...current };
+        let changed = false;
+        for (const name of parsedVariables) {
+          if (!(name in next)) {
+            next[name] = resolved[name];
+            changed = true;
+          }
         }
+        return changed ? next : current;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [parsedVariables]);
+
+  // 变量从正文中删除后再次出现时，重新应用 default
+  useEffect(() => {
+    const prevSet = new Set(prevParsedVariablesRef.current);
+    const newlyAdded = parsedVariables.filter((name) => !prevSet.has(name));
+    prevParsedVariablesRef.current = parsedVariables;
+
+    if (newlyAdded.length === 0) return;
+
+    void (async () => {
+      const resolved = await resolveFieldsForKeys(newlyAdded);
+      const defaults: Record<string, unknown> = {};
+      for (const name of newlyAdded) {
+        defaults[name] = resolved[name]?.default ?? draftFields[name]?.default ?? "";
       }
-      return changed ? next : current;
-    });
-  }, [parsedVariables, prompt?.schema?.fields]);
+      mergeVariableValues(defaults);
+    })();
+  }, [draftFields, mergeVariableValues, parsedVariables]);
 
   const filledContent = useMemo(
     () => fillTemplate(localContent, variableValues, draftFields),
     [localContent, variableValues, draftFields],
   );
 
-  const updateDraftField = (name: string, patch: Partial<VariableFieldDefinition>) => {
-    setDraftFields((current) => ({
-      ...current,
-      [name]: { ...(current[name] ?? createDefaultField(name)), ...patch },
-    }));
-  };
+  const isDirty = useMemo(() => {
+    if (!prompt) return false;
+
+    const savedTagIds = prompt.tags
+      .map((tag) => tag.id)
+      .sort()
+      .join(",");
+    const currentTagIds = [...selectedTagIds].sort().join(",");
+
+    if (localTitle !== prompt.title) return true;
+    if (localContent !== prompt.content) return true;
+    if (localNotes !== prompt.notes) return true;
+    if (categoryId !== prompt.categoryId) return true;
+    if (newCategoryName) return true;
+    if (rating !== prompt.rating) return true;
+    if (isFavorite !== prompt.isFavorite) return true;
+    if (isPrivate !== prompt.isPrivate) return true;
+    if (currentTagIds !== savedTagIds) return true;
+    if (newTagNames.length > 0) return true;
+    if (JSON.stringify(draftFields) !== JSON.stringify(baselineFields)) return true;
+
+    return false;
+  }, [
+    prompt,
+    localTitle,
+    localContent,
+    localNotes,
+    categoryId,
+    newCategoryName,
+    rating,
+    isFavorite,
+    isPrivate,
+    selectedTagIds,
+    newTagNames,
+    draftFields,
+    baselineFields,
+  ]);
+
+  const { leaveDialogOpen, confirmLeave, cancelLeave, guardAction } = useUnsavedChanges(isDirty);
+  const { sidebarWidth, isResizing, containerRef, onResizeStart } = useResizableSidebar();
 
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">加载中...</div>;
@@ -164,17 +241,23 @@ export default function PromptEditorPage() {
   }
 
   const handleSavePrompt = async () => {
-    const { schemaId } = await syncSchemaFromContent(localContent, localTitle, prompt.schema, draftFields);
+    let finalCategoryId = categoryId;
+    if (newCategoryName) {
+      const category = await categoryRepository.findOrCreate(newCategoryName);
+      finalCategoryId = category.id;
+      setCategories(await categoryRepository.getAll());
+      setNewCategoryName(null);
+      setCategoryId(category.id);
+    }
 
     await promptRepository.update(prompt.id, {
       title: localTitle,
       content: localContent,
       notes: localNotes,
-      categoryId,
+      categoryId: finalCategoryId,
       rating,
       isFavorite,
       isPrivate,
-      schemaId: schemaId ?? prompt.schemaId,
     });
 
     const existingTags = tags.filter((tag) => selectedTagIds.includes(tag.id));
@@ -193,22 +276,15 @@ export default function PromptEditorPage() {
   };
 
   const handleSaveVersion = async () => {
-    const { schemaId, fields } = await syncSchemaFromContent(
-      localContent,
-      localTitle,
-      prompt.schema,
-      draftFields,
-    );
     const version = await versionRepository.create({
       promptId: prompt.id,
       content: localContent,
-      schemaSnapshot: JSON.stringify(fields),
+      schemaSnapshot: JSON.stringify(draftFields),
       note: versionNote,
     });
     await promptRepository.update(prompt.id, {
       content: localContent,
       currentVersionId: version.id,
-      schemaId: schemaId ?? prompt.schemaId,
     });
     setVersionDialogOpen(false);
     setVersionNote("");
@@ -227,8 +303,27 @@ export default function PromptEditorPage() {
     router.push(`/prompts/${duplicate.id}`);
   };
 
+  const handleDuplicateWithGuard = () => {
+    guardAction(() => void handleDuplicate());
+  };
+
   const handleInsertText = (text: string) => {
     editorHandleRef.current?.insertText(text);
+  };
+
+  const handleInsertVariable = (key: string, definition: VariableFieldDefinition) => {
+    handleInsertText(buildVariablePlaceholder(key));
+    setDraftFields((current) => ({
+      ...current,
+      [key]: definition,
+    }));
+    mergeVariableValues({ [key]: definition.default ?? "" });
+  };
+
+  const handleGlobalFieldSaved = (fieldName: string, definition: VariableFieldDefinition) => {
+    setBaselineFields((current) => ({ ...current, [fieldName]: definition }));
+    setSaveMessage("全局变量已保存");
+    setTimeout(() => setSaveMessage(""), 2000);
   };
 
   return (
@@ -270,7 +365,7 @@ export default function PromptEditorPage() {
             <Copy className="h-4 w-4" />
             复制填充结果
           </Button>
-          <Button variant="outline" onClick={() => void handleDuplicate()}>
+          <Button variant="outline" onClick={handleDuplicateWithGuard}>
             <CopyPlus className="h-4 w-4" />
             创建副本
           </Button>
@@ -282,25 +377,22 @@ export default function PromptEditorPage() {
         </div>
       </div>
 
-      <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="flex min-h-0 flex-col border-r">
+      <div
+        ref={containerRef}
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row",
+          isResizing && "select-none",
+        )}
+      >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-            <Select
-              value={categoryId ?? "none"}
-              onValueChange={(value) => setCategoryId(value === "none" ? null : value)}
-            >
-              <SelectTrigger className="h-8 w-[140px]">
-                <SelectValue placeholder="分类" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">未分类</SelectItem>
-                {categories.map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CategorySelect
+              categories={categories}
+              categoryId={categoryId}
+              onCategoryIdChange={setCategoryId}
+              newCategoryName={newCategoryName}
+              onNewCategoryNameChange={setNewCategoryName}
+            />
 
             <TagMultiSelect
               tags={tags}
@@ -346,15 +438,17 @@ export default function PromptEditorPage() {
             />
           </div>
 
-          <div className="relative min-h-0 flex-1">
-            <MonacoEditor
-              key={`${prompt.id}-${editorKey}`}
-              defaultValue={localContent}
-              onChange={setLocalContent}
-              onReady={(handle) => {
-                editorHandleRef.current = handle;
-              }}
-            />
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div className="absolute inset-0">
+              <MonacoEditor
+                key={`${prompt.id}-${editorKey}`}
+                defaultValue={localContent}
+                onChange={setLocalContent}
+                onReady={(handle) => {
+                  editorHandleRef.current = handle;
+                }}
+              />
+            </div>
             <EditorInsertToolbar
               onInsertVariable={() => setInsertVariableOpen(true)}
               onInsertPrompt={() => setInsertPromptOpen(true)}
@@ -362,33 +456,52 @@ export default function PromptEditorPage() {
           </div>
         </div>
 
-        <aside className="min-h-0 overflow-auto p-4">
-          <Tabs value={editorPanelTab} onValueChange={(value) => setEditorPanelTab(value as typeof editorPanelTab)}>
-            <TabsList className="grid w-full grid-cols-5">
+        <PanelResizer onMouseDown={onResizeStart} isResizing={isResizing} />
+
+        <aside
+          className="flex min-h-0 w-full flex-1 flex-col overflow-hidden border-t p-4 lg:flex-none lg:w-[var(--sidebar-width)] lg:shrink-0 lg:border-t-0"
+          style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+        >
+          <Tabs
+            value={editorPanelTab}
+            onValueChange={(value) => setEditorPanelTab(value as typeof editorPanelTab)}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <TabsList className="grid w-full shrink-0 grid-cols-5">
               <TabsTrigger value="variables">变量</TabsTrigger>
               <TabsTrigger value="schema">Schema</TabsTrigger>
               <TabsTrigger value="versions">版本</TabsTrigger>
               <TabsTrigger value="results">结果</TabsTrigger>
               <TabsTrigger value="translation">翻译</TabsTrigger>
             </TabsList>
-            <TabsContent value="variables" className="mt-4">
+            <TabsContent
+              value="variables"
+              forceMount
+              className="mt-4 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
+            >
               <VariableFormPanel
                 prompt={prompt}
                 variableKey={variableKey}
                 fields={draftFields}
-                onUpdateField={updateDraftField}
               />
             </TabsContent>
-            <TabsContent value="schema" className="mt-4">
+            <TabsContent
+              value="schema"
+              forceMount
+              className="mt-4 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
+            >
               <SchemaEditorPanel
-                prompt={prompt}
                 variableKey={variableKey}
                 fields={draftFields}
                 onFieldsChange={setDraftFields}
-                onRefresh={refresh}
+                onFieldSaved={handleGlobalFieldSaved}
               />
             </TabsContent>
-            <TabsContent value="versions" className="mt-4">
+            <TabsContent
+              value="versions"
+              forceMount
+              className="mt-4 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
+            >
               <VersionPanel
                 promptId={prompt.id}
                 currentContent={localContent}
@@ -399,10 +512,18 @@ export default function PromptEditorPage() {
                 }}
               />
             </TabsContent>
-            <TabsContent value="results" className="mt-4">
+            <TabsContent
+              value="results"
+              forceMount
+              className="mt-4 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
+            >
               <ResultPanel promptId={prompt.id} />
             </TabsContent>
-            <TabsContent value="translation" className="mt-4">
+            <TabsContent
+              value="translation"
+              forceMount
+              className="mt-4 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
+            >
               <TranslationPanel content={filledContent || localContent} />
             </TabsContent>
           </Tabs>
@@ -435,8 +556,7 @@ export default function PromptEditorPage() {
       <InsertVariablePicker
         open={insertVariableOpen}
         onOpenChange={setInsertVariableOpen}
-        prompt={prompt}
-        onInsert={handleInsertText}
+        onInsert={handleInsertVariable}
       />
 
       <InsertPromptDialog
@@ -445,6 +565,23 @@ export default function PromptEditorPage() {
         currentPromptId={prompt.id}
         onInsert={handleInsertText}
       />
+
+      <Dialog open={leaveDialogOpen} onOpenChange={(open) => !open && cancelLeave()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>有未保存的更改</DialogTitle>
+            <DialogDescription>离开此页面将丢失未保存的内容，确定要离开吗？</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelLeave}>
+              继续编辑
+            </Button>
+            <Button variant="destructive" onClick={confirmLeave}>
+              离开不保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-3xl">

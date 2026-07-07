@@ -1,7 +1,6 @@
 import type {
   Category,
   ExportBundle,
-  GlobalVariableField,
   ImportConflictStrategy,
   Prompt,
   PromptQueryOptions,
@@ -9,6 +8,7 @@ import type {
   PromptVersion,
   PromptWithRelations,
   Tag,
+  VariableFieldDefinition,
   VariableSchema,
 } from "@/types";
 
@@ -21,7 +21,6 @@ export interface PromptRepository {
   duplicate(id: string): Promise<PromptWithRelations>;
   setTags(promptId: string, tagIds: string[]): Promise<void>;
   touchLastUsed(id: string): Promise<void>;
-  countBySchemaId(schemaId: string): Promise<number>;
 }
 
 export interface CategoryRepository {
@@ -29,6 +28,7 @@ export interface CategoryRepository {
   create(name: string): Promise<Category>;
   update(id: string, name: string): Promise<Category>;
   delete(id: string): Promise<void>;
+  findOrCreate(name: string): Promise<Category>;
 }
 
 export interface TagRepository {
@@ -55,19 +55,13 @@ export interface SchemaRepository {
   getById(id: string): Promise<VariableSchema | null>;
   getAll(): Promise<VariableSchema[]>;
   getTemplates(): Promise<VariableSchema[]>;
+  findTemplateByFieldKey(
+    key: string,
+  ): Promise<{ schema: VariableSchema; definition: VariableFieldDefinition } | null>;
   create(input: Pick<VariableSchema, "name" | "fields"> & Partial<Pick<VariableSchema, "isTemplate">>): Promise<VariableSchema>;
   update(id: string, input: Partial<Pick<VariableSchema, "name" | "fields" | "isTemplate">>): Promise<VariableSchema>;
   delete(id: string): Promise<void>;
   clone(id: string, name?: string): Promise<VariableSchema>;
-}
-
-export interface GlobalVariableFieldRepository {
-  getAll(): Promise<GlobalVariableField[]>;
-  getById(id: string): Promise<GlobalVariableField | null>;
-  getByKey(key: string): Promise<GlobalVariableField | null>;
-  create(input: Pick<GlobalVariableField, "key" | "definition"> & Partial<Pick<GlobalVariableField, "tags">>): Promise<GlobalVariableField>;
-  update(id: string, input: Partial<Pick<GlobalVariableField, "key" | "definition" | "tags">>): Promise<GlobalVariableField>;
-  delete(id: string): Promise<void>;
 }
 
 export interface ImportExportRepository {

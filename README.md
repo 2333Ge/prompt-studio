@@ -10,7 +10,7 @@ Local-first prompt management workbench built with Next.js, Dexie (IndexedDB), M
 - Prompt result storage per model
 - Privacy mode with hidden toggle (tap logo 10 times)
 - JSON import/export
-- Translation assist (iframe or external API, not persisted)
+- Translation assist via SiliconFlow AI (not persisted)
 
 ## Getting Started
 
