@@ -1,5 +1,6 @@
 import type { Table } from "dexie";
 import { flattenTagName } from "@/lib/db/migrate-tags";
+import { sanitizeTagStyle } from "@/lib/tag-style";
 import { generateId } from "@/lib/utils";
 import { getDb } from "@/lib/db";
 import type {
@@ -282,11 +283,52 @@ export class DexieTagRepository implements TagRepository {
     return getDb().tags.orderBy("name").toArray();
   }
 
+  async getById(id: string): Promise<Tag | null> {
+    const tag = await getDb().tags.get(id);
+    return tag ?? null;
+  }
+
   async create(name: string): Promise<Tag> {
     const flatName = flattenTagName(name.trim());
     const tag: Tag = { id: generateId(), name: flatName, createdAt: now() };
     await getDb().tags.add(tag);
     return tag;
+  }
+
+  async update(id: string, input: Partial<Pick<Tag, "name" | "style">>): Promise<Tag> {
+    const db = getDb();
+    const existing = await db.tags.get(id);
+    if (!existing) {
+      throw new Error("Tag not found");
+    }
+
+    const next: Tag = { ...existing, updatedAt: now() };
+
+    if (input.name !== undefined) {
+      const flatName = flattenTagName(input.name.trim());
+      if (!flatName) {
+        throw new Error("Tag name cannot be empty");
+      }
+      const duplicate = await db.tags
+        .filter((tag) => tag.id !== id && tag.name.toLowerCase() === flatName.toLowerCase())
+        .first();
+      if (duplicate) {
+        throw new Error("Tag name already exists");
+      }
+      next.name = flatName;
+    }
+
+    if (input.style !== undefined) {
+      const sanitized = sanitizeTagStyle(input.style);
+      if (sanitized) {
+        next.style = sanitized;
+      } else {
+        delete next.style;
+      }
+    }
+
+    await db.tags.put(next);
+    return next;
   }
 
   async delete(id: string): Promise<void> {

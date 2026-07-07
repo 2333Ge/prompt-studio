@@ -39,10 +39,18 @@ export interface Category {
   updatedAt: string;
 }
 
+export interface TagStyle {
+  backgroundColor?: string;
+  textColor?: string;
+  borderColor?: string;
+}
+
 export interface Tag {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt?: string;
+  style?: TagStyle;
 }
 
 export interface PromptTag {

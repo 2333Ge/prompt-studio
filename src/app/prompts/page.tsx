@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Search, CopyPlus, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { TagBadge } from "@/components/tag/tag-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -263,9 +264,7 @@ export default function PromptsPage() {
                   <div className="flex flex-wrap gap-2">
                     {prompt.category && <Badge variant="outline">{prompt.category.name}</Badge>}
                     {prompt.tags.map((tag) => (
-                      <Badge key={tag.id} variant="secondary">
-                        {tag.name}
-                      </Badge>
+                      <TagBadge key={tag.id} tag={tag} />
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground">

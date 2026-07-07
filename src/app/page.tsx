@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Plus, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { TagBadge } from "@/components/tag/tag-badge";
 import { usePrompts } from "@/hooks/use-prompts";
 import { promptRepository } from "@/lib/repositories/dexie-repositories";
 import { formatDate } from "@/lib/utils";
@@ -84,9 +84,7 @@ export default function DashboardPage() {
                 <div className="font-medium">{prompt.title}</div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {prompt.tags.slice(0, 3).map((tag) => (
-                    <Badge key={tag.id} variant="secondary">
-                      {tag.name}
-                    </Badge>
+                    <TagBadge key={tag.id} tag={tag} />
                   ))}
                 </div>
               </Link>

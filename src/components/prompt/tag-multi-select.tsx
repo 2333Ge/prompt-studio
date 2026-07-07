@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
+import { TagBadge } from "@/components/tag/tag-badge";
 import { cn } from "@/lib/utils";
 import type { Tag } from "@/types";
 
@@ -109,22 +110,7 @@ export function TagMultiSelect({
         }}
       >
         {selectedTags.map((tag) => (
-          <span
-            key={tag.id}
-            className="inline-flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5 text-xs"
-          >
-            {tag.name}
-            <button
-              type="button"
-              className="rounded-sm hover:bg-muted"
-              onClick={(event) => {
-                event.stopPropagation();
-                toggleTag(tag.id);
-              }}
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
+          <TagBadge key={tag.id} tag={tag} onRemove={() => toggleTag(tag.id)} />
         ))}
         {newTagNames.map((name) => (
           <span
@@ -190,13 +176,13 @@ export function TagMultiSelect({
                 key={tag.id}
                 type="button"
                 className={cn(
-                  "flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent",
+                  "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent",
                   selected && "text-primary",
                 )}
                 onClick={() => toggleTag(tag.id)}
               >
-                <span>{tag.name}</span>
-                {selected && <Check className="h-4 w-4" />}
+                <TagBadge tag={tag} className="pointer-events-none" />
+                {selected && <Check className="h-4 w-4 shrink-0" />}
               </button>
             );
           })}

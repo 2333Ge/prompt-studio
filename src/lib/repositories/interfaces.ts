@@ -33,7 +33,9 @@ export interface CategoryRepository {
 
 export interface TagRepository {
   getAll(): Promise<Tag[]>;
+  getById(id: string): Promise<Tag | null>;
   create(name: string): Promise<Tag>;
+  update(id: string, input: Partial<Pick<Tag, "name" | "style">>): Promise<Tag>;
   delete(id: string): Promise<void>;
   findOrCreate(names: string[]): Promise<Tag[]>;
 }
