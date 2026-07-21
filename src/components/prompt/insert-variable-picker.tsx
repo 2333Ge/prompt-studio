@@ -102,7 +102,7 @@ export function InsertVariablePicker({ open, onOpenChange, onInsert }: InsertVar
           ))}
           {!hasResults && (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              {templates.length === 0 ? "暂无全局 Schema 模板" : "没有匹配的变量"}
+              {templates.length === 0 ? "暂无全局变量模板" : "没有匹配的变量"}
             </p>
           )}
         </div>

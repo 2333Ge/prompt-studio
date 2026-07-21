@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Database, Eraser, Key, RefreshCw, Wrench } from "lucide-react";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { cn } from "@/lib/utils";
 import { clearAllData, initSeedData, resetAndSeed } from "@/lib/dev";
 import { initPrivacyFeature } from "@/lib/dev/init-privacy-feature";
@@ -14,6 +15,7 @@ type DevAction = {
   description: string;
   icon: React.ReactNode;
   dangerous?: boolean;
+  confirmMessage?: string;
   run: () => Promise<string>;
 };
 
@@ -69,10 +71,8 @@ export function DevTools() {
       description: "清空数据库后重新导入示例",
       icon: <RefreshCw className="h-3.5 w-3.5" />,
       dangerous: true,
+      confirmMessage: "确定清空全部数据并重新导入示例？",
       run: async () => {
-        if (!confirm("确定清空全部数据并重新导入示例？")) {
-          return "已取消";
-        }
         const result = await resetAndSeed();
         return `已重置（${result.imported} 条）`;
       },
@@ -83,10 +83,8 @@ export function DevTools() {
       description: "删除所有 Prompt 与关联数据",
       icon: <Eraser className="h-3.5 w-3.5" />,
       dangerous: true,
+      confirmMessage: "确定清空全部本地数据？",
       run: async () => {
-        if (!confirm("确定清空全部本地数据？")) {
-          return "已取消";
-        }
         await clearAllData();
         return "数据库已清空";
       },
@@ -129,8 +127,8 @@ export function DevTools() {
           <p className="text-[10px] text-muted-foreground">仅开发环境可见</p>
         </div>
         <ul className="p-1">
-          {actions.map((action) => (
-            <li key={action.id}>
+          {actions.map((action) => {
+            const actionButton = (
               <button
                 type="button"
                 disabled={!!busy}
@@ -138,7 +136,7 @@ export function DevTools() {
                   "flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent disabled:opacity-50",
                   action.dangerous && "text-destructive hover:bg-destructive/10",
                 )}
-                onClick={() => void runAction(action)}
+                onClick={action.confirmMessage ? undefined : () => void runAction(action)}
               >
                 <span className="flex items-center gap-2 text-xs font-medium">
                   {action.icon}
@@ -146,8 +144,26 @@ export function DevTools() {
                 </span>
                 <span className="pl-5 text-[10px] text-muted-foreground">{action.description}</span>
               </button>
-            </li>
-          ))}
+            );
+
+            return (
+              <li key={action.id}>
+                {action.confirmMessage ? (
+                  <ConfirmPopover
+                    message={action.confirmMessage}
+                    confirmLabel="确定"
+                    side="left"
+                    align="end"
+                    onConfirm={() => runAction(action)}
+                  >
+                    {actionButton}
+                  </ConfirmPopover>
+                ) : (
+                  actionButton
+                )}
+              </li>
+            );
+          })}
         </ul>
       </div>
 

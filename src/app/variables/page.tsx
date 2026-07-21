@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +34,7 @@ import { schemaRepository } from "@/lib/repositories/dexie-repositories";
 import { buildVariablePlaceholder } from "@/lib/variables/parser";
 import {
   findCrossTemplateKeyConflicts,
+  findGlobalField,
   moveGlobalFieldToSchema,
   saveGlobalFieldDefinition,
 } from "@/lib/variables/global-field-registry";
@@ -56,8 +58,16 @@ export default function VariablesPage() {
   const [schemaFields, setSchemaFields] = useState<Record<string, VariableFieldDefinition>>({});
   const [fieldOwners, setFieldOwners] = useState<Record<string, string>>({});
   const [overwriteDialogOpen, setOverwriteDialogOpen] = useState(false);
-  const [pendingSchemaSave, setPendingSchemaSave] = useState<VariableSchema | null>(null);
-  const [keyConflicts, setKeyConflicts] = useState<Array<{ key: string; schemaName: string }>>([]);
+  const [pendingFieldSave, setPendingFieldSave] = useState<{
+    key: string;
+    targetSchemaId: string;
+    conflictKeys: Array<{ key: string; schemaName: string }>;
+  } | null>(null);
+  const [expandedFieldKey, setExpandedFieldKey] = useState<string | null>(null);
+  const [fieldOriginalKeys, setFieldOriginalKeys] = useState<Record<string, string>>({});
+  const [savingFieldKey, setSavingFieldKey] = useState<string | null>(null);
+  const [savingName, setSavingName] = useState(false);
+  const [saveHint, setSaveHint] = useState<string | null>(null);
 
   const refresh = async () => {
     const schemaList = await schemaRepository.getTemplates();
@@ -87,6 +97,9 @@ export default function VariablesPage() {
     setSchemaName("");
     setSchemaFields({});
     setFieldOwners({});
+    setFieldOriginalKeys({});
+    setExpandedFieldKey(null);
+    setSaveHint(null);
     setSchemaDialogOpen(true);
   };
 
@@ -95,10 +108,15 @@ export default function VariablesPage() {
     setSchemaName(schema.name);
     setSchemaFields(structuredClone(schema.fields));
     const owners: Record<string, string> = {};
+    const originals: Record<string, string> = {};
     for (const key of Object.keys(schema.fields)) {
       owners[key] = schema.id;
+      originals[key] = key;
     }
     setFieldOwners(owners);
+    setFieldOriginalKeys(originals);
+    setExpandedFieldKey(null);
+    setSaveHint(null);
     setSchemaDialogOpen(true);
   };
 
@@ -108,81 +126,121 @@ export default function VariablesPage() {
     await refresh();
   };
 
-  const persistSchema = async (saveAsCopy = false) => {
-    const fieldsForCurrentSchema: Record<string, VariableFieldDefinition> = {};
-    const fieldsToMove: Array<{ key: string; definition: VariableFieldDefinition; targetSchemaId: string }> = [];
-
-    for (const [key, definition] of Object.entries(schemaFields)) {
-      const ownerId = fieldOwners[key] ?? editingSchema?.id;
-      if (!editingSchema || ownerId === editingSchema.id) {
-        fieldsForCurrentSchema[key] = definition;
-      } else {
-        fieldsToMove.push({ key, definition, targetSchemaId: ownerId });
-      }
+  const syncEditingSchema = async (schemaId: string) => {
+    const latest = await schemaRepository.getById(schemaId);
+    if (!latest) return;
+    setEditingSchema(latest);
+    setSchemaName(latest.name);
+    setSchemaFields(structuredClone(latest.fields));
+    const owners: Record<string, string> = {};
+    const originals: Record<string, string> = {};
+    for (const fieldKey of Object.keys(latest.fields)) {
+      owners[fieldKey] = latest.id;
+      originals[fieldKey] = fieldKey;
     }
-
-    if (saveAsCopy && editingSchema) {
-      const cloned = await schemaRepository.clone(editingSchema.id, `${schemaName} (副本)`);
-      await schemaRepository.update(cloned.id, { fields: fieldsForCurrentSchema, isTemplate: true });
-    } else if (editingSchema) {
-      await schemaRepository.update(editingSchema.id, {
-        name: schemaName,
-        fields: fieldsForCurrentSchema,
-        isTemplate: true,
-      });
-    } else {
-      await schemaRepository.create({ name: schemaName, fields: fieldsForCurrentSchema, isTemplate: true });
-    }
-
-    for (const { key, definition, targetSchemaId } of fieldsToMove) {
-      await saveGlobalFieldDefinition(key, definition, { targetSchemaId });
-    }
-
-    setSchemaDialogOpen(false);
-    setOverwriteDialogOpen(false);
-    setPendingSchemaSave(null);
-    setKeyConflicts([]);
-    await refresh();
+    setFieldOwners(owners);
+    setFieldOriginalKeys(originals);
   };
 
-  const persistSchemaWithConflictResolution = async () => {
-    for (const conflict of keyConflicts) {
+  const saveSchemaName = async () => {
+    const trimmedName = schemaName.trim();
+    if (!trimmedName) return;
+
+    setSavingName(true);
+    try {
+      if (editingSchema) {
+        await schemaRepository.update(editingSchema.id, { name: trimmedName, isTemplate: true });
+        await syncEditingSchema(editingSchema.id);
+      } else {
+        const created = await schemaRepository.create({
+          name: trimmedName,
+          fields: {},
+          isTemplate: true,
+        });
+        setEditingSchema(created);
+        setSchemaFields({});
+        setFieldOwners({});
+        setFieldOriginalKeys({});
+      }
+      await refresh();
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const removePersistedField = async (key: string, originalKey: string, ownerId: string) => {
+    const schema = await schemaRepository.getById(ownerId);
+    if (!schema || !(originalKey in schema.fields)) return;
+    const nextFields = { ...schema.fields };
+    delete nextFields[originalKey];
+    await schemaRepository.update(ownerId, { fields: nextFields, isTemplate: true });
+  };
+
+  const persistFieldSave = async (key: string, targetSchemaId: string) => {
+    if (!editingSchema) return;
+
+    const definition = schemaFields[key];
+    if (!definition) return;
+
+    const originalKey = fieldOriginalKeys[key] ?? key;
+    const previousOwnerId = fieldOwners[originalKey] ?? editingSchema.id;
+
+    if (originalKey !== key) {
+      await removePersistedField(key, originalKey, previousOwnerId);
+    }
+
+    await saveGlobalFieldDefinition(key, definition, { targetSchemaId });
+    await syncEditingSchema(editingSchema.id);
+    await refresh();
+    setExpandedFieldKey(null);
+    setSaveHint(null);
+  };
+
+  const saveSchemaField = async (key: string) => {
+    if (!editingSchema) {
+      setSaveHint("请先保存模板名称");
+      return;
+    }
+
+    const definition = schemaFields[key];
+    if (!definition) return;
+
+    const targetSchemaId = fieldOwners[key] ?? editingSchema.id;
+    const conflicts = await findCrossTemplateKeyConflicts({ [key]: definition }, targetSchemaId);
+
+    if (conflicts.length > 0) {
+      setPendingFieldSave({ key, targetSchemaId, conflictKeys: conflicts });
+      setOverwriteDialogOpen(true);
+      return;
+    }
+
+    setSavingFieldKey(key);
+    try {
+      await persistFieldSave(key, targetSchemaId);
+    } finally {
+      setSavingFieldKey(null);
+    }
+  };
+
+  const persistFieldSaveWithConflictResolution = async () => {
+    if (!pendingFieldSave) return;
+
+    for (const conflict of pendingFieldSave.conflictKeys) {
       const owner = await schemaRepository.findTemplateByFieldKey(conflict.key);
-      if (!owner || owner.schema.id === editingSchema?.id) continue;
+      if (!owner) continue;
       const nextFields = { ...owner.schema.fields };
       delete nextFields[conflict.key];
       await schemaRepository.update(owner.schema.id, { fields: nextFields, isTemplate: true });
     }
-    await persistSchema(false);
-  };
 
-  const saveSchema = async () => {
-    if (!schemaName.trim()) return;
-
-    const fieldsForCurrentSchema: Record<string, VariableFieldDefinition> = {};
-    for (const [key, definition] of Object.entries(schemaFields)) {
-      const ownerId = fieldOwners[key] ?? editingSchema?.id;
-      if (!editingSchema || ownerId === editingSchema.id) {
-        fieldsForCurrentSchema[key] = definition;
-      }
+    setSavingFieldKey(pendingFieldSave.key);
+    try {
+      await persistFieldSave(pendingFieldSave.key, pendingFieldSave.targetSchemaId);
+    } finally {
+      setSavingFieldKey(null);
+      setPendingFieldSave(null);
+      setOverwriteDialogOpen(false);
     }
-
-    const conflicts = await findCrossTemplateKeyConflicts(fieldsForCurrentSchema, editingSchema?.id);
-    if (conflicts.length > 0) {
-      setKeyConflicts(conflicts);
-      setPendingSchemaSave(editingSchema);
-      setOverwriteDialogOpen(true);
-      return;
-    }
-
-    if (editingSchema) {
-      setKeyConflicts([]);
-      setPendingSchemaSave(editingSchema);
-      setOverwriteDialogOpen(true);
-      return;
-    }
-
-    await persistSchema(false);
   };
 
   const addSchemaField = () => {
@@ -197,9 +255,11 @@ export default function VariablesPage() {
       ...current,
       [key]: defaultDefinition(),
     }));
+    setFieldOriginalKeys((current) => ({ ...current, [key]: key }));
     if (editingSchema) {
       setFieldOwners((current) => ({ ...current, [key]: editingSchema.id }));
     }
+    setExpandedFieldKey(key);
   };
 
   const updateSchemaFieldKey = (oldKey: string, newKey: string) => {
@@ -218,6 +278,14 @@ export default function VariablesPage() {
       delete next[oldKey];
       return next;
     });
+    setFieldOriginalKeys((current) => {
+      if (!(oldKey in current)) return current;
+      const next = { ...current };
+      next[trimmed] = current[oldKey];
+      delete next[oldKey];
+      return next;
+    });
+    setExpandedFieldKey((current) => (current === oldKey ? trimmed : current));
   };
 
   const updateSchemaFieldDefinition = (key: string, patch: Partial<VariableFieldDefinition>) => {
@@ -227,7 +295,19 @@ export default function VariablesPage() {
     }));
   };
 
-  const removeSchemaField = (key: string) => {
+  const removeSchemaField = async (key: string) => {
+    const originalKey = fieldOriginalKeys[key] ?? key;
+    const ownerId = fieldOwners[key] ?? editingSchema?.id;
+
+    if (editingSchema && ownerId) {
+      const existing = await findGlobalField(originalKey);
+      if (existing && existing.schema.id === ownerId) {
+        await removePersistedField(key, originalKey, ownerId);
+        await syncEditingSchema(editingSchema.id);
+        await refresh();
+      }
+    }
+
     setSchemaFields((current) => {
       const next = { ...current };
       delete next[key];
@@ -239,6 +319,13 @@ export default function VariablesPage() {
       delete next[key];
       return next;
     });
+    setFieldOriginalKeys((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setExpandedFieldKey((current) => (current === key ? null : current));
   };
 
   const updateFieldOwner = (key: string, schemaId: string) => {
@@ -249,7 +336,7 @@ export default function VariablesPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold">变量管理</h1>
-        <p className="text-sm text-muted-foreground">集中管理全局 Schema 模板</p>
+        <p className="text-sm text-muted-foreground">集中管理全局变量模板</p>
       </div>
 
       <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Schema 或字段..." />
@@ -257,7 +344,7 @@ export default function VariablesPage() {
       <div className="space-y-4">
         <Button onClick={openCreateSchema}>
           <Plus className="h-4 w-4" />
-          新建 Schema 模板
+          新建变量模板
         </Button>
         <div className="grid gap-3">
           {filteredSchemas.map((schema) => (
@@ -285,33 +372,51 @@ export default function VariablesPage() {
                   <Button variant="outline" size="sm" onClick={() => openEditSchema(schema)}>
                     编辑
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => void schemaRepository.delete(schema.id).then(refresh)}
+                  <ConfirmPopover
+                    message="确定删除该变量模板吗？"
+                    onConfirm={() => void schemaRepository.delete(schema.id).then(refresh)}
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                    <Button variant="ghost" size="icon" aria-label="删除">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </ConfirmPopover>
                 </div>
               </CardContent>
             </Card>
           ))}
           {filteredSchemas.length === 0 && (
-            <p className="text-sm text-muted-foreground">暂无 Schema 模板</p>
+            <p className="text-sm text-muted-foreground">暂无变量模板</p>
           )}
         </div>
       </div>
 
-      <Dialog open={schemaDialogOpen} onOpenChange={setSchemaDialogOpen}>
+      <Dialog
+        open={schemaDialogOpen}
+        onOpenChange={(open) => {
+          setSchemaDialogOpen(open);
+          if (!open) setExpandedFieldKey(null);
+        }}
+      >
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-auto">
           <DialogHeader>
-            <DialogTitle>{editingSchema ? "编辑 Schema 模板" : "新建 Schema 模板"}</DialogTitle>
+            <DialogTitle>{editingSchema ? "编辑变量模板" : "新建变量模板"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>名称</Label>
-              <Input value={schemaName} onChange={(event) => setSchemaName(event.target.value)} />
+            <div className="flex items-end gap-2">
+              <div className="flex-1 space-y-2">
+                <Label>名称</Label>
+                <Input value={schemaName} onChange={(event) => setSchemaName(event.target.value)} />
+              </div>
+              <Button
+                type="button"
+                onClick={() => void saveSchemaName()}
+                disabled={savingName || !schemaName.trim()}
+              >
+                {savingName ? "保存中..." : "保存"}
+              </Button>
             </div>
+
+            {saveHint && <p className="text-sm text-amber-600 dark:text-amber-400">{saveHint}</p>}
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -326,55 +431,107 @@ export default function VariablesPage() {
                 <p className="text-sm text-muted-foreground">暂无字段，点击「添加字段」开始配置。</p>
               )}
 
-              {Object.entries(schemaFields).map(([key, definition]) => (
-                <Card key={key}>
-                  <CardContent className="space-y-3 p-4">
-                    <div className="flex items-end gap-2">
-                      <div className="flex-1 space-y-2">
-                        <Label>变量 key</Label>
-                        <Input
-                          defaultValue={key}
-                          onBlur={(event) => updateSchemaFieldKey(key, event.target.value)}
-                        />
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeSchemaField(key)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {editingSchema && schemas.length > 1 && (
-                      <div className="space-y-2">
-                        <Label>所属分组</Label>
-                        <Select
-                          value={fieldOwners[key] ?? editingSchema.id}
-                          onValueChange={(value) => updateFieldOwner(key, value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {schemas.map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <FieldDefinitionEditor
-                      definition={definition}
-                      onChange={(next) => updateSchemaFieldDefinition(key, next)}
-                    />
-                  </CardContent>
-                </Card>
-              ))}
+              {Object.entries(schemaFields).map(([key, definition]) => {
+                const expanded = expandedFieldKey === key;
+                return (
+                  <Card key={key}>
+                    <CardContent className="space-y-3 p-4">
+                      {!expanded ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left transition-colors hover:bg-muted/50"
+                            onClick={() => setExpandedFieldKey(key)}
+                          >
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <p className="truncate font-mono text-sm">{key}</p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {definition.title?.trim() || "未设置标题"}
+                              </p>
+                            </div>
+                          </button>
+                          <ConfirmPopover
+                            message="确定删除该字段吗？"
+                            onConfirm={() => removeSchemaField(key)}
+                          >
+                            <Button variant="ghost" size="icon" aria-label="删除字段">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </ConfirmPopover>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="flex items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/50"
+                            onClick={() => setExpandedFieldKey(null)}
+                            aria-label="收起"
+                          >
+                            <ChevronDown className="h-4 w-4 shrink-0" />
+                          </button>
+                          <div className="flex items-end gap-2">
+                            <div className="flex-1 space-y-2">
+                              <Label>变量 key</Label>
+                              <Input
+                                defaultValue={key}
+                                onBlur={(event) => updateSchemaFieldKey(key, event.target.value)}
+                              />
+                            </div>
+                            <ConfirmPopover
+                              message="确定删除该字段吗？"
+                              onConfirm={() => removeSchemaField(key)}
+                            >
+                              <Button variant="ghost" size="icon" aria-label="删除字段">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </ConfirmPopover>
+                          </div>
+                          {editingSchema && schemas.length > 1 && (
+                            <div className="space-y-2">
+                              <Label>所属分组</Label>
+                              <Select
+                                value={fieldOwners[key] ?? editingSchema.id}
+                                onValueChange={(value) => updateFieldOwner(key, value)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {schemas.map((template) => (
+                                    <SelectItem key={template.id} value={template.id}>
+                                      {template.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                          <FieldDefinitionEditor
+                            definition={definition}
+                            onChange={(next) => updateSchemaFieldDefinition(key, next)}
+                          />
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              onClick={() => void saveSchemaField(key)}
+                              disabled={savingFieldKey === key}
+                            >
+                              {savingFieldKey === key ? "保存中..." : "保存"}
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSchemaDialogOpen(false)}>
-              取消
+              关闭
             </Button>
-            <Button onClick={() => void saveSchema()}>保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -382,34 +539,23 @@ export default function VariablesPage() {
       <Dialog open={overwriteDialogOpen} onOpenChange={setOverwriteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{keyConflicts.length > 0 ? "全局变量 key 冲突" : "确认覆盖 Schema"}</DialogTitle>
+            <DialogTitle>全局变量 key 冲突</DialogTitle>
             <DialogDescription>
-              {keyConflicts.length > 0 ? (
-                <>
-                  以下变量 key 已在其他 Schema 中定义，全局唯一，保存将从原 Schema 中移除并写入当前模板：
-                  <ul className="mt-2 list-inside list-disc">
-                    {keyConflicts.map((conflict) => (
-                      <li key={conflict.key}>
-                        <span className="font-mono">{conflict.key}</span> → 「{conflict.schemaName}」
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <>模板「{pendingSchemaSave?.name}」保存将覆盖使用该模板的 Prompt 表单配置。</>
-              )}
+              以下变量 key 已在其他 Schema 中定义，全局唯一，保存将从原 Schema 中移除并写入目标分组：
+              <ul className="mt-2 list-inside list-disc">
+                {pendingFieldSave?.conflictKeys.map((conflict) => (
+                  <li key={conflict.key}>
+                    <span className="font-mono">{conflict.key}</span> → 「{conflict.schemaName}」
+                  </li>
+                ))}
+              </ul>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setOverwriteDialogOpen(false)}>
               取消
             </Button>
-            {keyConflicts.length === 0 && (
-              <Button variant="secondary" onClick={() => void persistSchema(true)}>
-                另存为副本
-              </Button>
-            )}
-            <Button onClick={() => void persistSchemaWithConflictResolution()}>覆盖保存</Button>
+            <Button onClick={() => void persistFieldSaveWithConflictResolution()}>确认保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

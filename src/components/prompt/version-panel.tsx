@@ -8,7 +8,9 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { IconTipButton } from "@/components/ui/icon-tip-button";
+import { Button } from "@/components/ui/button";
 import { promptRepository, schemaRepository, versionRepository } from "@/lib/repositories/dexie-repositories";
 import { formatVersionDate } from "@/lib/utils";
 import type { PromptVersion } from "@/types";
@@ -65,7 +67,6 @@ export function VersionPanel({ promptId, currentContent, onRollback }: VersionPa
   };
 
   const handleDelete = async (version: PromptVersion) => {
-    if (!confirm("确定删除该版本记录吗？此操作不可恢复。")) return;
     await versionRepository.delete(version.id);
     if (compareVersion?.id === version.id) {
       setCompareVersion(null);
@@ -112,15 +113,19 @@ export function VersionPanel({ promptId, currentContent, onRollback }: VersionPa
               >
                 <RotateCcw className="h-3.5 w-3.5" />
               </IconTipButton>
-              <IconTipButton
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                label="删除"
-                onClick={() => void handleDelete(version)}
+              <ConfirmPopover
+                message="确定删除该版本记录吗？此操作不可恢复。"
+                onConfirm={() => void handleDelete(version)}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </IconTipButton>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  aria-label="删除"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </ConfirmPopover>
             </div>
           </div>
         ))

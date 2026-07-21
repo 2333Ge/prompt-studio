@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { categoryRepository } from "@/lib/repositories/dexie-repositories";
@@ -38,7 +39,6 @@ export default function CategoriesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("删除分类后，相关 Prompt 将变为未分类。继续吗？")) return;
     await categoryRepository.delete(id);
     await refresh();
   };
@@ -89,9 +89,15 @@ export default function CategoriesPage() {
                     <Pencil className="h-4 w-4" />
                   </Button>
                 )}
-                <Button size="icon" variant="ghost" onClick={() => void handleDelete(category.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <ConfirmPopover
+                  message="删除分类后，相关 Prompt 将变为未分类。继续吗？"
+                  confirmLabel="继续"
+                  onConfirm={() => void handleDelete(category.id)}
+                >
+                  <Button size="icon" variant="ghost" aria-label="删除">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </ConfirmPopover>
               </div>
             </CardContent>
           </Card>

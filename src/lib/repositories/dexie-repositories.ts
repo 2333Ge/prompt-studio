@@ -150,6 +150,7 @@ export class DexiePromptRepository implements PromptRepository {
       schemaId: input.schemaId ?? null,
       currentVersionId: null,
       mediaRefs: input.mediaRefs ?? [],
+      variableValues: input.variableValues ?? {},
       createdAt: timestamp,
       updatedAt: timestamp,
       lastUsedAt: null,
@@ -205,6 +206,7 @@ export class DexiePromptRepository implements PromptRepository {
       isFavorite: source.isFavorite,
       isPrivate: source.isPrivate,
       schemaId,
+      variableValues: { ...(source.variableValues ?? {}) },
     });
 
     await this.setTags(

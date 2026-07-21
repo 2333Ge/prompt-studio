@@ -71,6 +71,8 @@ export interface Prompt {
   schemaId: string | null;
   currentVersionId: string | null;
   mediaRefs: string[];
+  /** 变量面板中填写的测试值，按 prompt 持久化 */
+  variableValues?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;

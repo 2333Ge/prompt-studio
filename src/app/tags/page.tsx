@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { tagRepository } from "@/lib/repositories/dexie-repositories";
@@ -32,7 +33,6 @@ export default function TagsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("确定删除该标签吗？")) return;
     await tagRepository.delete(id);
     await refresh();
   };
@@ -79,17 +79,20 @@ export default function TagsPage() {
               }}
             >
               <span>{tag.name}</span>
-              <button
-                type="button"
-                className="rounded-sm p-0.5 opacity-40 transition-opacity hover:bg-black/10 hover:opacity-100 group-hover:opacity-70 dark:hover:bg-white/10"
-                aria-label={`删除 ${tag.name}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleDelete(tag.id);
-                }}
+              <ConfirmPopover
+                message="确定删除该标签吗？"
+                onConfirm={() => void handleDelete(tag.id)}
               >
-                <Trash2 className="h-3 w-3" />
-              </button>
+                <button
+                  type="button"
+                  className="rounded-sm p-0.5 opacity-40 transition-opacity hover:bg-black/10 hover:opacity-100 group-hover:opacity-70 dark:hover:bg-white/10"
+                  aria-label={`删除 ${tag.name}`}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </ConfirmPopover>
             </div>
           );
         })}

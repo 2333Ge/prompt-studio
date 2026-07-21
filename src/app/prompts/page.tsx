@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { TagBadge } from "@/components/tag/tag-badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,7 +58,6 @@ export default function PromptsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("确定删除这个 Prompt 吗？")) return;
     await promptRepository.delete(id);
     await refresh();
   };
@@ -279,9 +279,14 @@ export default function PromptsPage() {
                   <Button variant="outline" size="icon" title="创建副本" onClick={() => void handleDuplicate(prompt.id)}>
                     <CopyPlus className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => void handleDelete(prompt.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <ConfirmPopover
+                    message="确定删除这个 Prompt 吗？"
+                    onConfirm={() => void handleDelete(prompt.id)}
+                  >
+                    <Button variant="ghost" size="icon" aria-label="删除">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </ConfirmPopover>
                 </div>
               </CardContent>
             </Card>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -132,9 +133,11 @@ function ResultCard({ result, onDelete }: { result: PromptResult; onDelete: () =
             <p className="font-medium">{result.modelName}</p>
             <p className="text-xs text-muted-foreground">{formatDate(result.createdAt)}</p>
           </div>
-          <Button size="icon" variant="ghost" onClick={onDelete}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <ConfirmPopover message="确定删除该结果记录吗？" onConfirm={onDelete}>
+            <Button size="icon" variant="ghost" aria-label="删除">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </ConfirmPopover>
         </div>
         {result.note && <p className="text-sm text-muted-foreground">{result.note}</p>}
         {imageUrls.length > 0 && (

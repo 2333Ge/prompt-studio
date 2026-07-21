@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/monaco/setup";
 import { DiffEditor } from "@monaco-editor/react";
 
 interface MonacoDiffEditorProps {

@@ -23,7 +23,7 @@ export function protectSegments(text: string): { protectedText: string; segments
 
   let protectedText = text;
 
-  protectedText = protectedText.replace(/```[\s\S]*?```/g, (match) => protect(match));
+  protectedText = protectedText.replacimage.pnge(/```[\s\S]*?```/g, (match) => protect(match));
   protectedText = protectedText.replace(/`[^`\n]+`/g, (match) => protect(match));
   protectedText = protectedText.replace(/\{\{\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\}\}/g, (match) => protect(match));
   protectedText = protectedText.replace(/https?:\/\/[^\s)]+/g, (match) => protect(match));

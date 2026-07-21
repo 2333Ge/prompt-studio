@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { TagBadge } from "@/components/tag/tag-badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -141,7 +142,6 @@ export default function TagEditPage() {
 
   const handleDelete = async () => {
     if (!tag) return;
-    if (!confirm("确定删除该标签吗？")) return;
     await tagRepository.delete(tag.id);
     router.push("/tags");
   };
@@ -228,9 +228,11 @@ export default function TagEditPage() {
         <Button type="button" variant="outline" onClick={handleResetStyle}>
           恢复默认
         </Button>
-        <Button type="button" variant="destructive" onClick={() => void handleDelete()}>
-          删除标签
-        </Button>
+        <ConfirmPopover message="确定删除该标签吗？" onConfirm={() => void handleDelete()}>
+          <Button type="button" variant="destructive">
+            删除标签
+          </Button>
+        </ConfirmPopover>
       </div>
     </div>
   );
